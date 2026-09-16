@@ -1,0 +1,513 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>白饭牌 · 单机版</title>
+<style>
+  :root {
+    --bg: #0f1216;
+    --bg-soft: #161b22;
+    --panel: #1c2230;
+    --panel-2: #232b3b;
+    --line: #2f3948;
+    --text: #e6ebf2;
+    --muted: #93a1b5;
+    --accent: #4ea1ff;
+    --accent-2: #ffb347;
+    --danger: #ff6b6b;
+    --ok: #48d597;
+    --card-plain: #f4f6fa;
+    --card-plain-text: #1b2029;
+    --radius: 12px;
+    --shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  }
+
+  * { box-sizing: border-box; }
+
+  /* hidden 属性必须始终生效：任何 .foo { display: ... } 都会盖过浏览器默认的
+     [hidden] { display: none }，所以这里用 !important 兜住，
+     避免"JS 设了 hidden 但界面上还在"的问题。 */
+  [hidden] { display: none !important; }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: radial-gradient(1200px 700px at 50% -10%, #1b2433 0%, var(--bg) 60%);
+    color: var(--text);
+    font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  button { font-family: inherit; }
+
+  .app {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 14px 16px 28px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 320px;
+    grid-template-areas:
+      "header header"
+      "board side"
+      "hand side";
+    gap: 12px 16px;
+  }
+
+  header { grid-area: header; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  h1 { font-size: 20px; margin: 0; letter-spacing: 1px; }
+  .subtitle { color: var(--muted); font-size: 12.5px; }
+
+  .badge {
+    font-size: 12px; padding: 3px 9px; border-radius: 999px;
+    border: 1px solid var(--line); color: var(--muted); background: var(--panel);
+  }
+  .badge.turn { color: #0d1117; background: var(--accent-2); border-color: transparent; font-weight: 700; }
+  .badge.lock { color: #f5e9ff; background: linear-gradient(135deg, #7c3aed, #a855f7); border-color: transparent; }
+  .badge.magic { color: #0d1117; background: linear-gradient(135deg, #7dd3fc, #38bdf8); border-color: transparent; }
+  .badge.mode { color: #cfe0f5; background: rgba(78,161,255,.16); border-color: rgba(78,161,255,.45); }
+
+  .board { grid-area: board; }
+  .board-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+
+  .column {
+    background: linear-gradient(180deg, var(--panel), var(--bg-soft));
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 10px;
+    min-height: 230px;
+    display: flex; flex-direction: column; gap: 8px;
+    transition: border-color .15s, box-shadow .15s, transform .15s;
+  }
+  .column.clickable { cursor: pointer; }
+  .column.legal { border-color: rgba(72,213,151,.55); }
+  /* 选中某张牌后，这张牌放不了的列变暗，避免"点了没反应"的困惑 */
+  .column.not-for-selected {
+    opacity: .42;
+    border-style: dashed;
+  }
+  .column.selected { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(78,161,255,.35); }
+  .column.banned { border-color: rgba(255,107,107,.6); }
+  .column-head { display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: var(--muted); }
+  .column-head b { color: var(--text); font-size: 12.5px; }
+
+  /* ---- 牌堆：只露出牌头的叠放，点一下看完整信息 ---- */
+  .fanned {
+    position: relative;
+    margin-top: auto;
+    margin-bottom: 2px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    cursor: pointer;
+    padding-top: 20px; /* 给"共 N 张"留位置 */
+  }
+  .fanned .fanned-card { line-height: 0; }
+  .fanned:hover .card-strip { outline: 1px solid rgba(255,255,255,.35); }
+  .fanned .stack-depth {
+    position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+    font-size: 11px; color: var(--muted); white-space: nowrap;
+    background: var(--bg-soft); border: 1px solid var(--line);
+    border-radius: 999px; padding: 1px 8px;
+  }
+  .fanned .top-flag {
+    position: absolute; right: 0; top: 0;
+    font-size: 9.5px; color: var(--accent);
+    background: rgba(78,161,255,.14); border: 1px solid rgba(78,161,255,.4);
+    border-radius: 999px; padding: 1px 6px;
+  }
+
+  .empty-slot {
+    border: 1px dashed var(--line); border-radius: 8px; color: var(--muted);
+    font-size: 12px; padding: 14px; text-align: center;
+  }
+  .stack-hint { font-size: 11px; color: var(--muted); text-align: center; }
+  .column.tall .fanned { justify-content: flex-start; }
+
+  .card {
+    width: 58px; height: 80px; border-radius: 9px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    font-weight: 800; user-select: none; position: relative;
+    border: 1px solid rgba(255,255,255,.14);
+    box-shadow: var(--shadow);
+    transition: transform .12s, box-shadow .12s, border-color .12s;
+  }
+  .card .rank { font-size: 26px; line-height: 1; }
+  .card .kind { font-size: 9.5px; font-weight: 600; opacity: .8; margin-top: 3px; letter-spacing: .5px; }
+  .card.small { width: 46px; height: 64px; }
+  .card.small .rank { font-size: 20px; }
+  .card.mini { width: 40px; height: 54px; }
+  .card.mini .rank { font-size: 17px; }
+  .card.mini .kind { font-size: 8px; }
+
+  /* 叠放用的牌条：无论被压住多少，牌头永远露在外面 */
+  .card-strip {
+    width: 46px; height: 54px; border-radius: 7px;
+    border: 1px solid rgba(255,255,255,.16);
+    box-shadow: 0 2px 6px rgba(0,0,0,.45);
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 5px; user-select: none; overflow: hidden;
+  }
+  .card-strip .strip-rank { font-size: 16px; font-weight: 800; line-height: 1; }
+  .card-strip .strip-kind { font-size: 9px; opacity: .85; letter-spacing: .3px; }
+  .card-strip.theme-plain { background: var(--card-plain); color: var(--card-plain-text); }
+  .card-strip.theme-purple { background: linear-gradient(120deg, #a78bfa, #7c3aed); color: #fff; }
+  .card-strip.theme-black { background: linear-gradient(120deg, #2b3038, #0b0d11); color: #fff; border-color: #4b5563; }
+  .card-strip.theme-light { background: linear-gradient(120deg, #fef3c7, #fbbf24); color: #3b2a05; }
+  .card-strip.theme-dark { background: linear-gradient(120deg, #6b4b2a, #2f1f10); color: #ffe9c7; }
+  .card-strip.theme-magic-light { background: linear-gradient(120deg, #bae6fd, #38bdf8); color: #06283d; }
+  .card-strip.theme-magic-dark { background: linear-gradient(120deg, #4c1d95, #1e1b4b); color: #ddd6fe; }
+  .card-strip.is-top { box-shadow: 0 8px 18px rgba(0,0,0,.55), 0 0 0 1.5px rgba(78,161,255,.65); }
+
+  .card.theme-plain { background: var(--card-plain); color: var(--card-plain-text); }
+  .card.theme-purple { background: linear-gradient(160deg, #a78bfa, #7c3aed); color: #fff; }
+  .card.theme-black { background: linear-gradient(160deg, #2b3038, #0b0d11); color: #fff; border-color: #4b5563; }
+  .card.theme-light { background: linear-gradient(160deg, #fef3c7, #fbbf24); color: #3b2a05; }
+  .card.theme-dark { background: linear-gradient(160deg, #6b4b2a, #2f1f10); color: #ffe9c7; }
+  .card.theme-magic-light { background: linear-gradient(160deg, #bae6fd, #38bdf8); color: #06283d; }
+  .card.theme-magic-dark { background: linear-gradient(160deg, #4c1d95, #1e1b4b); color: #ddd6fe; }
+
+  .hand-area { grid-area: hand; }
+  .hand-panel {
+    background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+    padding: 10px 12px; display: flex; flex-direction: column; gap: 8px;
+  }
+
+  /* ---- 技能面板 ---- */
+  .skill-box { display: flex; flex-direction: column; gap: 8px; }
+  .skill-card {
+    border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px;
+    background: var(--bg-soft); display: flex; flex-direction: column; gap: 5px;
+  }
+  .skill-card.mine { border-color: rgba(78,161,255,.45); background: rgba(78,161,255,.07); }
+  .skill-card.usable { border-color: rgba(72,213,151,.6); box-shadow: 0 0 0 1px rgba(72,213,151,.25); }
+  .skill-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .skill-name { font-size: 13.5px; font-weight: 700; }
+  .skill-owner { font-size: 11px; color: var(--muted); }
+  .skill-tag {
+    font-size: 10.5px; padding: 1px 6px; border-radius: 999px;
+    border: 1px solid var(--line); color: var(--muted); margin-left: auto;
+  }
+  .skill-tag.active { color: #b9f5d8; border-color: rgba(72,213,151,.5); }
+  .skill-tag.used { color: #ffc9c9; border-color: rgba(255,107,107,.45); }
+  .skill-text { font-size: 11.5px; color: var(--muted); line-height: 1.55; }
+  /* 威严专属：发动中 / 已失效 */
+  .skill-state {
+    font-size: 11.5px; line-height: 1.5; border-radius: 6px; padding: 4px 7px;
+  }
+  .skill-state.on {
+    color: #fde68a; background: rgba(251,191,36,.12); border: 1px solid rgba(251,191,36,.5);
+  }
+  .skill-state.off {
+    color: var(--muted); background: rgba(148,163,184,.10); border: 1px solid rgba(148,163,184,.35);
+  }
+  .skill-card.live { border-color: rgba(251,191,36,.55); }
+  .skill-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+  /* 看破：看过的对方手牌 */
+  .reveal-box {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    border: 1px solid rgba(125,211,252,.45); background: rgba(56,189,248,.10);
+    border-radius: 10px; padding: 6px 10px; font-size: 12px; color: #bae6fd;
+  }
+  .reveal-box .reveal-title { color: #7dd3fc; white-space: nowrap; }
+  .reveal-box .reveal-card {
+    border: 1px solid rgba(125,211,252,.5); border-radius: 6px;
+    padding: 1px 7px; color: #e0f2fe; background: rgba(2,132,199,.18);
+  }
+  .reveal-box .reveal-note { color: var(--muted); font-size: 11px; }
+  .skill-actions .btn { font-size: 11.5px; padding: 4px 8px; }
+
+  /* ---- 交互式选牌（观星 / 汇流） ---- */
+  .choice-bar {
+    border: 1px solid rgba(72,213,151,.55);
+    background: linear-gradient(135deg, rgba(72,213,151,.16), rgba(16,185,129,.05));
+    border-radius: 10px; padding: 10px 12px;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .choice-bar .choice-title { font-size: 13px; font-weight: 700; color: #b9f5d8; }
+  .hand-row .card.picked { transform: translateY(-10px); box-shadow: 0 0 0 2px var(--ok), var(--shadow); }
+  /* 选牌阶段：候选牌高亮，非候选（例如汇流里不是刚抽到的那几张）低亮 */
+  .hand-row .card.pickable {
+    box-shadow: 0 0 0 2px rgba(72,213,151,.55), var(--shadow);
+    cursor: pointer;
+  }
+  .hand-row .card.out-of-pool { opacity: .32; filter: grayscale(.6); cursor: not-allowed; }
+
+  /* 开局禁列：内嵌在操作区，不再用弹窗挡住手牌 */
+  .ban-bar {
+    border: 1px solid rgba(255,179,71,.55);
+    background: linear-gradient(135deg, rgba(255,179,71,.16), rgba(255,179,71,.05));
+    border-radius: 10px; padding: 10px 12px;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .ban-bar .ban-title { font-size: 13px; font-weight: 700; color: #ffd79a; }
+
+  /* 当前生效的限制（魔法 / 紫 0 限锁 / 禁列）：做成显眼的横幅 */
+  .act-bar {
+    display: flex; align-items: flex-start; gap: 9px;
+    border-radius: 10px; padding: 10px 12px;
+    font-size: 13px; line-height: 1.6; font-weight: 600;
+    border: 1px solid transparent;
+  }
+  .act-bar[hidden] { display: none; }
+  .act-bar .act-icon { font-size: 15px; line-height: 1.3; }
+  .act-bar.lock {
+    color: #f0e2ff;
+    background: linear-gradient(135deg, rgba(168,85,247,.32), rgba(124,58,237,.14));
+    border-color: rgba(196,132,252,.7);
+    box-shadow: 0 0 0 1px rgba(196,132,252,.25), 0 0 18px rgba(168,85,247,.25);
+  }
+  .act-bar.magic {
+    color: #d4f0ff;
+    background: linear-gradient(135deg, rgba(56,189,248,.3), rgba(14,165,233,.12));
+    border-color: rgba(125,211,252,.7);
+    box-shadow: 0 0 0 1px rgba(125,211,252,.25), 0 0 18px rgba(56,189,248,.22);
+  }
+  .act-bar.ban {
+    color: #ffe3bd;
+    background: linear-gradient(135deg, rgba(245,158,11,.28), rgba(180,83,9,.12));
+    border-color: rgba(251,191,36,.7);
+        box-shadow: 0 0 0 1px rgba(251,191,36,.22), 0 0 18px rgba(245,158,11,.2);
+  }
+  .act-bar.forced {
+    color: #d9ffe9;
+    background: linear-gradient(135deg, rgba(72,213,151,.28), rgba(16,185,129,.1));
+    border-color: rgba(110,231,183,.7);
+  }
+
+  .hand-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13px; }
+  .hand-head .who { font-weight: 700; }
+  .hand-row { display: flex; gap: 8px; flex-wrap: wrap; min-height: 84px; }
+  .hand-row .card { cursor: pointer; }
+  .hand-row .card:hover { transform: translateY(-6px); }
+  .hand-row .card.selected { transform: translateY(-10px); box-shadow: 0 0 0 2px var(--accent), var(--shadow); }
+  .hand-row .card.blocked { opacity: .38; cursor: not-allowed; }
+  .hand-row .card.blocked:hover { transform: none; }
+
+  .side { grid-area: side; display: flex; flex-direction: column; gap: 12px; }
+  .panel {
+    background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px;
+  }
+  .panel h2 { margin: 0 0 8px; font-size: 13px; color: var(--muted); font-weight: 700; letter-spacing: .5px; }
+  .panel .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .stat-line { display: flex; justify-content: space-between; font-size: 13px; padding: 3px 0; }
+  .stat-line span:last-child { font-weight: 700; }
+
+  button.btn {
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
+    border-radius: 9px; padding: 8px 12px; font-size: 13px; cursor: pointer; transition: .15s;
+  }
+  button.btn:hover:not(:disabled) { border-color: var(--accent); color: #fff; }
+  button.btn:disabled { opacity: .45; cursor: not-allowed; }
+  button.btn.primary { background: linear-gradient(135deg, #2f80ed, #4ea1ff); border-color: transparent; color: #04121f; font-weight: 700; }
+  button.btn.warn { background: linear-gradient(135deg, #b45309, #f59e0b); border-color: transparent; color: #1b1200; font-weight: 700; }
+  button.btn.ghost { background: transparent; }
+  button.btn.sm { padding: 5px 9px; font-size: 12px; }
+
+  .log { display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow-y: auto; font-size: 12px; }
+  .log div { color: var(--muted); border-left: 2px solid var(--line); padding-left: 8px; }
+  .log div.hi { color: var(--text); border-color: var(--accent); }
+  .log div.bad { color: #ffc9c9; border-color: var(--danger); }
+  .log div.good { color: #b9f5d8; border-color: var(--ok); }
+
+  .hint-box {
+    font-size: 12.5px; line-height: 1.65; color: #cfe0f5;
+    background: linear-gradient(135deg, rgba(78,161,255,.12), rgba(78,161,255,.04));
+    border: 1px solid rgba(78,161,255,.3); border-radius: 10px; padding: 9px 11px;
+    white-space: pre-wrap;
+  }
+
+  .overlay {
+    position: fixed; inset: 0; background: rgba(6, 9, 14, .78);
+    display: flex; align-items: center; justify-content: center; padding: 20px; z-index: 50;
+    backdrop-filter: blur(4px);
+  }
+  .overlay[hidden] { display: none; }
+  .modal {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 16px;
+    padding: 22px; max-width: 560px; width: 100%; box-shadow: 0 20px 60px rgba(0,0,0,.5);
+  }
+  .modal h2 { margin: 0 0 6px; font-size: 22px; }
+  .modal p { color: var(--muted); font-size: 13.5px; line-height: 1.7; margin: 6px 0 14px; }
+  .diff-list { display: grid; gap: 8px; }
+  .diff {
+    display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px;
+    border: 1px solid var(--line); border-radius: 11px; cursor: pointer; transition: .15s;
+  }
+  .diff:hover { border-color: var(--accent); background: var(--panel-2); }
+  .diff.selected { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(78,161,255,.28); }
+  .diff .name { font-weight: 700; font-size: 14px; }
+  .diff .desc { color: var(--muted); font-size: 12.5px; line-height: 1.55; }
+  .section-label {
+    font-size: 12px; color: var(--muted); font-weight: 700;
+    letter-spacing: .5px; margin: 14px 0 8px;
+  }
+
+  .pile { display: flex; gap: 4px; flex-wrap: wrap; max-height: 130px; overflow-y: auto; }
+  .pile .card.mini { width: 30px; height: 40px; }
+  .pile .card.mini .rank { font-size: 13px; }
+  .pile .card.mini .kind { display: none; }
+
+  details.rules { font-size: 12.5px; color: var(--muted); line-height: 1.75; }
+  details.rules summary { cursor: pointer; color: var(--text); font-weight: 600; margin-bottom: 6px; }
+  details.rules li { margin-bottom: 4px; }
+
+  /* 技能一览：名称 + 发动方式 + 原文效果 */
+  .skill-list { display: flex; flex-direction: column; gap: 7px; }
+  .skill-list .skill-item { border-left: 2px solid var(--line); padding-left: 8px; }
+  .skill-list .skill-item b { color: var(--text); font-size: 12.5px; }
+  .skill-list .skill-kind { font-size: 11px; color: var(--muted); margin-left: 6px; }
+  .skill-list .skill-desc { display: block; font-size: 11.5px; color: var(--muted); }
+
+  .build-stamp {
+    text-align: center; color: #4b5768; font-size: 11px;
+    padding: 0 0 16px; letter-spacing: .3px;
+  }
+
+  .trace-box {
+    display: flex; flex-direction: column; gap: 3px;
+    max-height: 200px; overflow-y: auto;
+    font-size: 11px; line-height: 1.5; color: var(--muted);
+  }
+  .trace-box div { border-left: 2px solid var(--line); padding-left: 7px; }
+  .trace-box div.bad { color: #ffc9c9; border-color: var(--danger); }
+
+  /* 牌堆详情弹窗 */
+  .col-detail { display: flex; flex-direction: column-reverse; gap: 6px; margin: 6px 0 4px; }
+  .col-detail .detail-row {
+    display: flex; align-items: center; gap: 10px;
+    border: 1px solid var(--line); border-radius: 10px; padding: 7px 10px;
+    background: var(--bg-soft);
+  }
+  .col-detail .detail-row.top { border-color: var(--accent); background: rgba(78,161,255,.1); }
+  .col-detail .detail-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .col-detail .detail-name { font-size: 13.5px; font-weight: 700; }
+  .col-detail .detail-blurb { font-size: 12px; color: var(--muted); }
+  .col-detail .detail-order { font-size: 11px; color: var(--muted); margin-left: auto; white-space: nowrap; }
+
+  @media (max-width: 900px) {
+    .app { grid-template-columns: minmax(0, 1fr); grid-template-areas: "header" "board" "hand" "side"; }
+  }
+  @media (max-width: 520px) {
+    .card { width: 48px; height: 68px; }
+    .card .rank { font-size: 21px; }
+    .card.small { width: 40px; height: 56px; }
+  }
+</style>
+</head>
+<body>
+<div id="boot" data-boot="fail"></div>
+<div class="app">
+  <header>
+    <h1>白饭牌 <span class="badge">单机版</span></h1>
+    <span id="modeBadge" class="badge mode">人机对战</span>
+    <span id="turnBadge" class="badge turn">准备开始</span>
+    <span id="lockBadge" class="badge lock" hidden>紫 0 限锁中</span>
+    <span id="magicBadge" class="badge magic" hidden></span>
+    <span style="flex:1"></span>
+    <button id="btnRules" class="btn sm ghost">规则</button>
+    <button id="btnNew" class="btn sm">重开</button>
+  </header>
+
+  <main class="board">
+    <div id="boardGrid" class="board-grid"></div>
+  </main>
+
+  <section class="hand-area">
+    <div class="hand-panel">
+      <div id="banBar" class="ban-bar" hidden>
+        <div class="ban-title">你是后手：请指定 AI 第一手不能放的列</div>
+        <div class="row" id="banRow"></div>
+      </div>
+      <div id="choiceBar" class="choice-bar" hidden>
+        <div class="choice-title" id="choiceTitle"></div>
+        <div class="row" id="choiceRow"></div>
+      </div>
+      <div id="actBar" class="act-bar" hidden>
+        <span class="act-icon">⚠</span>
+        <span id="actText"></span>
+      </div>
+      <div class="hand-head">
+        <span class="who" id="myHandLabel">我的手牌</span>
+        <span id="myCount" class="badge">5 张</span>
+        <span style="flex:1"></span>
+        <span id="oppInfo" class="subtitle"></span>
+      </div>
+      <div id="myHand" class="hand-row"></div>
+      <div id="revealBox" class="reveal-box" hidden></div>
+      <div class="hand-head" style="margin-top:4px">
+        <button id="btnPass" class="btn warn sm">过牌（抽 2 张，对手抽 1 张）</button>
+        <button id="btnHint" class="btn sm">提示</button>
+        <span id="statusLine" class="subtitle"></span>
+      </div>
+    </div>
+  </section>
+
+  <aside class="side">
+    <div class="panel">
+      <h2>局面</h2>
+      <div class="stat-line"><span>抽牌堆</span><span id="statDeck">24</span></div>
+      <div class="stat-line"><span>对手手牌</span><span id="statOpp">5</span></div>
+      <div class="stat-line"><span>我的手牌</span><span id="statMine">5</span></div>
+      <div class="stat-line"><span>已出局</span><span id="statOut">0</span></div>
+      <div class="stat-line"><span>AI 难度</span><span id="statAi">普通</span></div>
+    </div>
+
+    <div class="panel">
+      <h2>技能</h2>
+      <div id="skillBox" class="skill-box"></div>
+    </div>
+
+    <div class="panel">
+      <h2>提示</h2>
+      <div id="hintBox" class="hint-box">点「提示」让教练给一手建议。</div>
+    </div>
+
+    <div class="panel">
+      <h2>战报</h2>
+      <div id="logBox" class="log"></div>
+    </div>
+
+    <div class="panel">
+      <h2>已出局的牌</h2>
+      <div id="outPile" class="pile"><span class="subtitle">暂无</span></div>
+    </div>
+
+    <div class="panel">
+      <details class="rules">
+        <summary>规则速查</summary>
+        <ul id="ruleList"></ul>
+      </details>
+    </div>
+
+    <div class="panel">
+      <details class="rules">
+        <summary>技能一览</summary>
+        <div id="skillList" class="skill-list"></div>
+      </details>
+    </div>
+
+    <div class="panel">
+      <details class="rules" id="tracePanel">
+        <summary>出了什么问题？（着法溯源）</summary>
+        <div class="subtitle" style="margin-bottom:6px">
+          记录每一步是谁推进的。如果出现"AI 替你出牌"，把这里的内容发我即可定位。
+        </div>
+        <div id="traceBox" class="trace-box"></div>
+      </details>
+    </div>
+  </aside>
+</div>
+
+<div id="modal" class="overlay" hidden>
+  <div class="modal" id="modalBody"></div>
+</div>
+
+<!-- 构建信息：由 tools/build.mjs 填入 -->
+<div class="build-stamp">构建于 __BUILD_STAMP__</div>
+
+<script>
+__BUNDLE__
+</script>
+</body>
+</html>

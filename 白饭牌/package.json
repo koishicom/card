@@ -1,0 +1,18 @@
+{
+  "name": "baifan-cards",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "白饭牌：37 张牌的三列叠放对战游戏，含可复用引擎、三档 AI、模拟器与单机浏览器版",
+  "scripts": {
+    "test": "node tools/test.mjs",
+    "test:skills": "node tools/skill-test.mjs",
+    "test:ui": "node tools/ui-test.mjs",
+    "build": "node tools/build.mjs",
+    "tournament": "node tools/tournament.mjs",
+    "diagnose": "node tools/diagnose.mjs",
+    "trace": "node tools/trace.mjs",
+    "sweep": "node tools/sweep.mjs",
+    "verify": "node tools/test.mjs && node tools/skill-test.mjs && node tools/build.mjs && node tools/ui-test.mjs && node tools/tournament.mjs 200"
+  }
+}

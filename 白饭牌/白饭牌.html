@@ -1,0 +1,4717 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>白饭牌 · 单机版</title>
+<style>
+  :root {
+    --bg: #0f1216;
+    --bg-soft: #161b22;
+    --panel: #1c2230;
+    --panel-2: #232b3b;
+    --line: #2f3948;
+    --text: #e6ebf2;
+    --muted: #93a1b5;
+    --accent: #4ea1ff;
+    --accent-2: #ffb347;
+    --danger: #ff6b6b;
+    --ok: #48d597;
+    --card-plain: #f4f6fa;
+    --card-plain-text: #1b2029;
+    --radius: 12px;
+    --shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  }
+
+  * { box-sizing: border-box; }
+
+  /* hidden 属性必须始终生效：任何 .foo { display: ... } 都会盖过浏览器默认的
+     [hidden] { display: none }，所以这里用 !important 兜住，
+     避免"JS 设了 hidden 但界面上还在"的问题。 */
+  [hidden] { display: none !important; }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: radial-gradient(1200px 700px at 50% -10%, #1b2433 0%, var(--bg) 60%);
+    color: var(--text);
+    font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  button { font-family: inherit; }
+
+  .app {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 14px 16px 28px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 320px;
+    grid-template-areas:
+      "header header"
+      "board side"
+      "hand side";
+    gap: 12px 16px;
+  }
+
+  header { grid-area: header; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  h1 { font-size: 20px; margin: 0; letter-spacing: 1px; }
+  .subtitle { color: var(--muted); font-size: 12.5px; }
+
+  .badge {
+    font-size: 12px; padding: 3px 9px; border-radius: 999px;
+    border: 1px solid var(--line); color: var(--muted); background: var(--panel);
+  }
+  .badge.turn { color: #0d1117; background: var(--accent-2); border-color: transparent; font-weight: 700; }
+  .badge.lock { color: #f5e9ff; background: linear-gradient(135deg, #7c3aed, #a855f7); border-color: transparent; }
+  .badge.magic { color: #0d1117; background: linear-gradient(135deg, #7dd3fc, #38bdf8); border-color: transparent; }
+  .badge.mode { color: #cfe0f5; background: rgba(78,161,255,.16); border-color: rgba(78,161,255,.45); }
+
+  .board { grid-area: board; }
+  .board-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+
+  .column {
+    background: linear-gradient(180deg, var(--panel), var(--bg-soft));
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 10px;
+    min-height: 230px;
+    display: flex; flex-direction: column; gap: 8px;
+    transition: border-color .15s, box-shadow .15s, transform .15s;
+  }
+  .column.clickable { cursor: pointer; }
+  .column.legal { border-color: rgba(72,213,151,.55); }
+  /* 选中某张牌后，这张牌放不了的列变暗，避免"点了没反应"的困惑 */
+  .column.not-for-selected {
+    opacity: .42;
+    border-style: dashed;
+  }
+  .column.selected { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(78,161,255,.35); }
+  .column.banned { border-color: rgba(255,107,107,.6); }
+  .column-head { display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: var(--muted); }
+  .column-head b { color: var(--text); font-size: 12.5px; }
+
+  /* ---- 牌堆：只露出牌头的叠放，点一下看完整信息 ---- */
+  .fanned {
+    position: relative;
+    margin-top: auto;
+    margin-bottom: 2px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    cursor: pointer;
+    padding-top: 20px; /* 给"共 N 张"留位置 */
+  }
+  .fanned .fanned-card { line-height: 0; }
+  .fanned:hover .card-strip { outline: 1px solid rgba(255,255,255,.35); }
+  .fanned .stack-depth {
+    position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+    font-size: 11px; color: var(--muted); white-space: nowrap;
+    background: var(--bg-soft); border: 1px solid var(--line);
+    border-radius: 999px; padding: 1px 8px;
+  }
+  .fanned .top-flag {
+    position: absolute; right: 0; top: 0;
+    font-size: 9.5px; color: var(--accent);
+    background: rgba(78,161,255,.14); border: 1px solid rgba(78,161,255,.4);
+    border-radius: 999px; padding: 1px 6px;
+  }
+
+  .empty-slot {
+    border: 1px dashed var(--line); border-radius: 8px; color: var(--muted);
+    font-size: 12px; padding: 14px; text-align: center;
+  }
+  .stack-hint { font-size: 11px; color: var(--muted); text-align: center; }
+  .column.tall .fanned { justify-content: flex-start; }
+
+  .card {
+    width: 58px; height: 80px; border-radius: 9px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    font-weight: 800; user-select: none; position: relative;
+    border: 1px solid rgba(255,255,255,.14);
+    box-shadow: var(--shadow);
+    transition: transform .12s, box-shadow .12s, border-color .12s;
+  }
+  .card .rank { font-size: 26px; line-height: 1; }
+  .card .kind { font-size: 9.5px; font-weight: 600; opacity: .8; margin-top: 3px; letter-spacing: .5px; }
+  .card.small { width: 46px; height: 64px; }
+  .card.small .rank { font-size: 20px; }
+  .card.mini { width: 40px; height: 54px; }
+  .card.mini .rank { font-size: 17px; }
+  .card.mini .kind { font-size: 8px; }
+
+  /* 叠放用的牌条：无论被压住多少，牌头永远露在外面 */
+  .card-strip {
+    width: 46px; height: 54px; border-radius: 7px;
+    border: 1px solid rgba(255,255,255,.16);
+    box-shadow: 0 2px 6px rgba(0,0,0,.45);
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 5px; user-select: none; overflow: hidden;
+  }
+  .card-strip .strip-rank { font-size: 16px; font-weight: 800; line-height: 1; }
+  .card-strip .strip-kind { font-size: 9px; opacity: .85; letter-spacing: .3px; }
+  .card-strip.theme-plain { background: var(--card-plain); color: var(--card-plain-text); }
+  .card-strip.theme-purple { background: linear-gradient(120deg, #a78bfa, #7c3aed); color: #fff; }
+  .card-strip.theme-black { background: linear-gradient(120deg, #2b3038, #0b0d11); color: #fff; border-color: #4b5563; }
+  .card-strip.theme-light { background: linear-gradient(120deg, #fef3c7, #fbbf24); color: #3b2a05; }
+  .card-strip.theme-dark { background: linear-gradient(120deg, #6b4b2a, #2f1f10); color: #ffe9c7; }
+  .card-strip.theme-magic-light { background: linear-gradient(120deg, #bae6fd, #38bdf8); color: #06283d; }
+  .card-strip.theme-magic-dark { background: linear-gradient(120deg, #4c1d95, #1e1b4b); color: #ddd6fe; }
+  .card-strip.is-top { box-shadow: 0 8px 18px rgba(0,0,0,.55), 0 0 0 1.5px rgba(78,161,255,.65); }
+
+  .card.theme-plain { background: var(--card-plain); color: var(--card-plain-text); }
+  .card.theme-purple { background: linear-gradient(160deg, #a78bfa, #7c3aed); color: #fff; }
+  .card.theme-black { background: linear-gradient(160deg, #2b3038, #0b0d11); color: #fff; border-color: #4b5563; }
+  .card.theme-light { background: linear-gradient(160deg, #fef3c7, #fbbf24); color: #3b2a05; }
+  .card.theme-dark { background: linear-gradient(160deg, #6b4b2a, #2f1f10); color: #ffe9c7; }
+  .card.theme-magic-light { background: linear-gradient(160deg, #bae6fd, #38bdf8); color: #06283d; }
+  .card.theme-magic-dark { background: linear-gradient(160deg, #4c1d95, #1e1b4b); color: #ddd6fe; }
+
+  .hand-area { grid-area: hand; }
+  .hand-panel {
+    background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+    padding: 10px 12px; display: flex; flex-direction: column; gap: 8px;
+  }
+
+  /* ---- 技能面板 ---- */
+  .skill-box { display: flex; flex-direction: column; gap: 8px; }
+  .skill-card {
+    border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px;
+    background: var(--bg-soft); display: flex; flex-direction: column; gap: 5px;
+  }
+  .skill-card.mine { border-color: rgba(78,161,255,.45); background: rgba(78,161,255,.07); }
+  .skill-card.usable { border-color: rgba(72,213,151,.6); box-shadow: 0 0 0 1px rgba(72,213,151,.25); }
+  .skill-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .skill-name { font-size: 13.5px; font-weight: 700; }
+  .skill-owner { font-size: 11px; color: var(--muted); }
+  .skill-tag {
+    font-size: 10.5px; padding: 1px 6px; border-radius: 999px;
+    border: 1px solid var(--line); color: var(--muted); margin-left: auto;
+  }
+  .skill-tag.active { color: #b9f5d8; border-color: rgba(72,213,151,.5); }
+  .skill-tag.used { color: #ffc9c9; border-color: rgba(255,107,107,.45); }
+  .skill-text { font-size: 11.5px; color: var(--muted); line-height: 1.55; }
+  /* 威严专属：发动中 / 已失效 */
+  .skill-state {
+    font-size: 11.5px; line-height: 1.5; border-radius: 6px; padding: 4px 7px;
+  }
+  .skill-state.on {
+    color: #fde68a; background: rgba(251,191,36,.12); border: 1px solid rgba(251,191,36,.5);
+  }
+  .skill-state.off {
+    color: var(--muted); background: rgba(148,163,184,.10); border: 1px solid rgba(148,163,184,.35);
+  }
+  .skill-card.live { border-color: rgba(251,191,36,.55); }
+  .skill-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+  /* 看破：看过的对方手牌 */
+  .reveal-box {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    border: 1px solid rgba(125,211,252,.45); background: rgba(56,189,248,.10);
+    border-radius: 10px; padding: 6px 10px; font-size: 12px; color: #bae6fd;
+  }
+  .reveal-box .reveal-title { color: #7dd3fc; white-space: nowrap; }
+  .reveal-box .reveal-card {
+    border: 1px solid rgba(125,211,252,.5); border-radius: 6px;
+    padding: 1px 7px; color: #e0f2fe; background: rgba(2,132,199,.18);
+  }
+  .reveal-box .reveal-note { color: var(--muted); font-size: 11px; }
+  .skill-actions .btn { font-size: 11.5px; padding: 4px 8px; }
+
+  /* ---- 交互式选牌（观星 / 汇流） ---- */
+  .choice-bar {
+    border: 1px solid rgba(72,213,151,.55);
+    background: linear-gradient(135deg, rgba(72,213,151,.16), rgba(16,185,129,.05));
+    border-radius: 10px; padding: 10px 12px;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .choice-bar .choice-title { font-size: 13px; font-weight: 700; color: #b9f5d8; }
+  .hand-row .card.picked { transform: translateY(-10px); box-shadow: 0 0 0 2px var(--ok), var(--shadow); }
+  /* 选牌阶段：候选牌高亮，非候选（例如汇流里不是刚抽到的那几张）低亮 */
+  .hand-row .card.pickable {
+    box-shadow: 0 0 0 2px rgba(72,213,151,.55), var(--shadow);
+    cursor: pointer;
+  }
+  .hand-row .card.out-of-pool { opacity: .32; filter: grayscale(.6); cursor: not-allowed; }
+
+  /* 开局禁列：内嵌在操作区，不再用弹窗挡住手牌 */
+  .ban-bar {
+    border: 1px solid rgba(255,179,71,.55);
+    background: linear-gradient(135deg, rgba(255,179,71,.16), rgba(255,179,71,.05));
+    border-radius: 10px; padding: 10px 12px;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .ban-bar .ban-title { font-size: 13px; font-weight: 700; color: #ffd79a; }
+
+  /* 当前生效的限制（魔法 / 紫 0 限锁 / 禁列）：做成显眼的横幅 */
+  .act-bar {
+    display: flex; align-items: flex-start; gap: 9px;
+    border-radius: 10px; padding: 10px 12px;
+    font-size: 13px; line-height: 1.6; font-weight: 600;
+    border: 1px solid transparent;
+  }
+  .act-bar[hidden] { display: none; }
+  .act-bar .act-icon { font-size: 15px; line-height: 1.3; }
+  .act-bar.lock {
+    color: #f0e2ff;
+    background: linear-gradient(135deg, rgba(168,85,247,.32), rgba(124,58,237,.14));
+    border-color: rgba(196,132,252,.7);
+    box-shadow: 0 0 0 1px rgba(196,132,252,.25), 0 0 18px rgba(168,85,247,.25);
+  }
+  .act-bar.magic {
+    color: #d4f0ff;
+    background: linear-gradient(135deg, rgba(56,189,248,.3), rgba(14,165,233,.12));
+    border-color: rgba(125,211,252,.7);
+    box-shadow: 0 0 0 1px rgba(125,211,252,.25), 0 0 18px rgba(56,189,248,.22);
+  }
+  .act-bar.ban {
+    color: #ffe3bd;
+    background: linear-gradient(135deg, rgba(245,158,11,.28), rgba(180,83,9,.12));
+    border-color: rgba(251,191,36,.7);
+        box-shadow: 0 0 0 1px rgba(251,191,36,.22), 0 0 18px rgba(245,158,11,.2);
+  }
+  .act-bar.forced {
+    color: #d9ffe9;
+    background: linear-gradient(135deg, rgba(72,213,151,.28), rgba(16,185,129,.1));
+    border-color: rgba(110,231,183,.7);
+  }
+
+  .hand-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13px; }
+  .hand-head .who { font-weight: 700; }
+  .hand-row { display: flex; gap: 8px; flex-wrap: wrap; min-height: 84px; }
+  .hand-row .card { cursor: pointer; }
+  .hand-row .card:hover { transform: translateY(-6px); }
+  .hand-row .card.selected { transform: translateY(-10px); box-shadow: 0 0 0 2px var(--accent), var(--shadow); }
+  .hand-row .card.blocked { opacity: .38; cursor: not-allowed; }
+  .hand-row .card.blocked:hover { transform: none; }
+
+  .side { grid-area: side; display: flex; flex-direction: column; gap: 12px; }
+  .panel {
+    background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px;
+  }
+  .panel h2 { margin: 0 0 8px; font-size: 13px; color: var(--muted); font-weight: 700; letter-spacing: .5px; }
+  .panel .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .stat-line { display: flex; justify-content: space-between; font-size: 13px; padding: 3px 0; }
+  .stat-line span:last-child { font-weight: 700; }
+
+  button.btn {
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
+    border-radius: 9px; padding: 8px 12px; font-size: 13px; cursor: pointer; transition: .15s;
+  }
+  button.btn:hover:not(:disabled) { border-color: var(--accent); color: #fff; }
+  button.btn:disabled { opacity: .45; cursor: not-allowed; }
+  button.btn.primary { background: linear-gradient(135deg, #2f80ed, #4ea1ff); border-color: transparent; color: #04121f; font-weight: 700; }
+  button.btn.warn { background: linear-gradient(135deg, #b45309, #f59e0b); border-color: transparent; color: #1b1200; font-weight: 700; }
+  button.btn.ghost { background: transparent; }
+  button.btn.sm { padding: 5px 9px; font-size: 12px; }
+
+  .log { display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow-y: auto; font-size: 12px; }
+  .log div { color: var(--muted); border-left: 2px solid var(--line); padding-left: 8px; }
+  .log div.hi { color: var(--text); border-color: var(--accent); }
+  .log div.bad { color: #ffc9c9; border-color: var(--danger); }
+  .log div.good { color: #b9f5d8; border-color: var(--ok); }
+
+  .hint-box {
+    font-size: 12.5px; line-height: 1.65; color: #cfe0f5;
+    background: linear-gradient(135deg, rgba(78,161,255,.12), rgba(78,161,255,.04));
+    border: 1px solid rgba(78,161,255,.3); border-radius: 10px; padding: 9px 11px;
+    white-space: pre-wrap;
+  }
+
+  .overlay {
+    position: fixed; inset: 0; background: rgba(6, 9, 14, .78);
+    display: flex; align-items: center; justify-content: center; padding: 20px; z-index: 50;
+    backdrop-filter: blur(4px);
+  }
+  .overlay[hidden] { display: none; }
+  .modal {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 16px;
+    padding: 22px; max-width: 560px; width: 100%; box-shadow: 0 20px 60px rgba(0,0,0,.5);
+  }
+  .modal h2 { margin: 0 0 6px; font-size: 22px; }
+  .modal p { color: var(--muted); font-size: 13.5px; line-height: 1.7; margin: 6px 0 14px; }
+  .diff-list { display: grid; gap: 8px; }
+  .diff {
+    display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px;
+    border: 1px solid var(--line); border-radius: 11px; cursor: pointer; transition: .15s;
+  }
+  .diff:hover { border-color: var(--accent); background: var(--panel-2); }
+  .diff.selected { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(78,161,255,.28); }
+  .diff .name { font-weight: 700; font-size: 14px; }
+  .diff .desc { color: var(--muted); font-size: 12.5px; line-height: 1.55; }
+  .section-label {
+    font-size: 12px; color: var(--muted); font-weight: 700;
+    letter-spacing: .5px; margin: 14px 0 8px;
+  }
+
+  .pile { display: flex; gap: 4px; flex-wrap: wrap; max-height: 130px; overflow-y: auto; }
+  .pile .card.mini { width: 30px; height: 40px; }
+  .pile .card.mini .rank { font-size: 13px; }
+  .pile .card.mini .kind { display: none; }
+
+  details.rules { font-size: 12.5px; color: var(--muted); line-height: 1.75; }
+  details.rules summary { cursor: pointer; color: var(--text); font-weight: 600; margin-bottom: 6px; }
+  details.rules li { margin-bottom: 4px; }
+
+  /* 技能一览：名称 + 发动方式 + 原文效果 */
+  .skill-list { display: flex; flex-direction: column; gap: 7px; }
+  .skill-list .skill-item { border-left: 2px solid var(--line); padding-left: 8px; }
+  .skill-list .skill-item b { color: var(--text); font-size: 12.5px; }
+  .skill-list .skill-kind { font-size: 11px; color: var(--muted); margin-left: 6px; }
+  .skill-list .skill-desc { display: block; font-size: 11.5px; color: var(--muted); }
+
+  .build-stamp {
+    text-align: center; color: #4b5768; font-size: 11px;
+    padding: 0 0 16px; letter-spacing: .3px;
+  }
+
+  .trace-box {
+    display: flex; flex-direction: column; gap: 3px;
+    max-height: 200px; overflow-y: auto;
+    font-size: 11px; line-height: 1.5; color: var(--muted);
+  }
+  .trace-box div { border-left: 2px solid var(--line); padding-left: 7px; }
+  .trace-box div.bad { color: #ffc9c9; border-color: var(--danger); }
+
+  /* 牌堆详情弹窗 */
+  .col-detail { display: flex; flex-direction: column-reverse; gap: 6px; margin: 6px 0 4px; }
+  .col-detail .detail-row {
+    display: flex; align-items: center; gap: 10px;
+    border: 1px solid var(--line); border-radius: 10px; padding: 7px 10px;
+    background: var(--bg-soft);
+  }
+  .col-detail .detail-row.top { border-color: var(--accent); background: rgba(78,161,255,.1); }
+  .col-detail .detail-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .col-detail .detail-name { font-size: 13.5px; font-weight: 700; }
+  .col-detail .detail-blurb { font-size: 12px; color: var(--muted); }
+  .col-detail .detail-order { font-size: 11px; color: var(--muted); margin-left: auto; white-space: nowrap; }
+
+  @media (max-width: 900px) {
+    .app { grid-template-columns: minmax(0, 1fr); grid-template-areas: "header" "board" "hand" "side"; }
+  }
+  @media (max-width: 520px) {
+    .card { width: 48px; height: 68px; }
+    .card .rank { font-size: 21px; }
+    .card.small { width: 40px; height: 56px; }
+  }
+</style>
+</head>
+<body>
+<div id="boot" data-boot="fail"></div>
+<div class="app">
+  <header>
+    <h1>白饭牌 <span class="badge">单机版</span></h1>
+    <span id="modeBadge" class="badge mode">人机对战</span>
+    <span id="turnBadge" class="badge turn">准备开始</span>
+    <span id="lockBadge" class="badge lock" hidden>紫 0 限锁中</span>
+    <span id="magicBadge" class="badge magic" hidden></span>
+    <span style="flex:1"></span>
+    <button id="btnRules" class="btn sm ghost">规则</button>
+    <button id="btnNew" class="btn sm">重开</button>
+  </header>
+
+  <main class="board">
+    <div id="boardGrid" class="board-grid"></div>
+  </main>
+
+  <section class="hand-area">
+    <div class="hand-panel">
+      <div id="banBar" class="ban-bar" hidden>
+        <div class="ban-title">你是后手：请指定 AI 第一手不能放的列</div>
+        <div class="row" id="banRow"></div>
+      </div>
+      <div id="choiceBar" class="choice-bar" hidden>
+        <div class="choice-title" id="choiceTitle"></div>
+        <div class="row" id="choiceRow"></div>
+      </div>
+      <div id="actBar" class="act-bar" hidden>
+        <span class="act-icon">⚠</span>
+        <span id="actText"></span>
+      </div>
+      <div class="hand-head">
+        <span class="who" id="myHandLabel">我的手牌</span>
+        <span id="myCount" class="badge">5 张</span>
+        <span style="flex:1"></span>
+        <span id="oppInfo" class="subtitle"></span>
+      </div>
+      <div id="myHand" class="hand-row"></div>
+      <div id="revealBox" class="reveal-box" hidden></div>
+      <div class="hand-head" style="margin-top:4px">
+        <button id="btnPass" class="btn warn sm">过牌（抽 2 张，对手抽 1 张）</button>
+        <button id="btnHint" class="btn sm">提示</button>
+        <span id="statusLine" class="subtitle"></span>
+      </div>
+    </div>
+  </section>
+
+  <aside class="side">
+    <div class="panel">
+      <h2>局面</h2>
+      <div class="stat-line"><span>抽牌堆</span><span id="statDeck">24</span></div>
+      <div class="stat-line"><span>对手手牌</span><span id="statOpp">5</span></div>
+      <div class="stat-line"><span>我的手牌</span><span id="statMine">5</span></div>
+      <div class="stat-line"><span>已出局</span><span id="statOut">0</span></div>
+      <div class="stat-line"><span>AI 难度</span><span id="statAi">普通</span></div>
+    </div>
+
+    <div class="panel">
+      <h2>技能</h2>
+      <div id="skillBox" class="skill-box"></div>
+    </div>
+
+    <div class="panel">
+      <h2>提示</h2>
+      <div id="hintBox" class="hint-box">点「提示」让教练给一手建议。</div>
+    </div>
+
+    <div class="panel">
+      <h2>战报</h2>
+      <div id="logBox" class="log"></div>
+    </div>
+
+    <div class="panel">
+      <h2>已出局的牌</h2>
+      <div id="outPile" class="pile"><span class="subtitle">暂无</span></div>
+    </div>
+
+    <div class="panel">
+      <details class="rules">
+        <summary>规则速查</summary>
+        <ul id="ruleList"></ul>
+      </details>
+    </div>
+
+    <div class="panel">
+      <details class="rules">
+        <summary>技能一览</summary>
+        <div id="skillList" class="skill-list"></div>
+      </details>
+    </div>
+
+    <div class="panel">
+      <details class="rules" id="tracePanel">
+        <summary>出了什么问题？（着法溯源）</summary>
+        <div class="subtitle" style="margin-bottom:6px">
+          记录每一步是谁推进的。如果出现"AI 替你出牌"，把这里的内容发我即可定位。
+        </div>
+        <div id="traceBox" class="trace-box"></div>
+      </details>
+    </div>
+  </aside>
+</div>
+
+<div id="modal" class="overlay" hidden>
+  <div class="modal" id="modalBody"></div>
+</div>
+
+<!-- 构建信息：由 tools/build.mjs 填入 -->
+<div class="build-stamp">构建于 2026-09-16 11:25（10 模块 + UI）</div>
+
+<script>
+(function () {
+'use strict';
+
+// ─── src/engine/random.js ────────────────────────────────────────
+/**
+ * 可注入的随机源。
+ *
+ * 引擎与 AI 都不直接调用 Math.random，而是接收一个 RandomSource，
+ * 这样：模拟可复现、AI 可控制噪声、对战回放可重演。
+ *
+ * @typedef {object} RandomSource
+ * @property {() => number} next     返回 [0, 1) 的浮点数
+ * @property {(n: number) => number} int  返回 [0, n) 的整数
+ * @property {() => number} state    导出当前内部状态（用于回放）
+ */
+
+/** @param {number} seed @returns {RandomSource} */
+function createRng(seed) {
+  let s = (seed >>> 0) || 0x9e3779b9;
+  const next = () => {
+    s = (s + 0x6d2b79f5) >>> 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  return {
+    next,
+    int: (n) => {
+      if (!Number.isInteger(n) || n <= 0) throw new Error(`rng.int 需要正整数，收到 ${n}`);
+      return Math.floor(next() * n);
+    },
+    state: () => s,
+  };
+}
+
+/** @returns {RandomSource} 每次调用产生独立随机序列 */
+function createSeededRng(seedString) {
+  const text = String(seedString ?? '');
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return createRng(h);
+}
+
+/** Fisher-Yates 洗牌，返回新数组，不修改入参。 */
+function shuffle(items, rng) {
+  const out = items.slice();
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = rng.int(i + 1);
+    const tmp = out[i];
+    out[i] = out[j];
+    out[j] = tmp;
+  }
+  return out;
+}
+
+/** 从数组中随机取 k 个不重复元素（返回新数组）。 */
+function sample(items, k, rng) {
+  if (k <= 0) return [];
+  if (k >= items.length) return shuffle(items, rng);
+  const pool = items.slice();
+  const out = [];
+  for (let i = 0; i < k; i++) {
+    const j = rng.int(pool.length);
+    out.push(pool[j]);
+    pool[j] = pool[pool.length - 1];
+    pool.pop();
+  }
+  return out;
+}
+
+// ─── src/engine/cards.js ─────────────────────────────────────────
+/**
+ * 卡牌定义与牌库构成。
+ *
+ * 37 张牌：
+ *   普通数字 0-5 各 4 张 ............ 24
+ *   紫色 0 .........................  1
+ *   黑色 5 .........................  2
+ *   浅色 E / 深色 E ................   6
+ *   浅色 M / 深色 M ................   4
+ */
+
+const CARD = Object.freeze({
+  KIND: Object.freeze({ NUMBER: 'number', E: 'e', M: 'm' }),
+  COLOR: Object.freeze({ PLAIN: 'plain', PURPLE: 'purple', BLACK: 'black', LIGHT: 'light', DARK: 'dark' }),
+});
+
+const CARD_TEXT = Object.freeze({
+  number: '数字',
+  e: '炸弹',
+  m: '魔法',
+  plain: '普通',
+  purple: '紫色',
+  black: '黑色',
+  light: '浅色',
+  dark: '深色',
+});
+
+const DECK_SIZE = 37;
+const HAND_SIZE = 5;
+const BASE_COUNT = 3;
+const COLUMNS = 3;
+
+const isDigit = (card) => card.kind === CARD.KIND.NUMBER;
+const isBomb = (card) => card.kind === CARD.KIND.E;
+const isMagic = (card) => card.kind === CARD.KIND.M;
+const isDark = (card) => card.color === CARD.COLOR.DARK;
+const isBlackFive = (card) => isDigit(card) && card.color === CARD.COLOR.BLACK;
+const isPurpleZero = (card) => isDigit(card) && card.color === CARD.COLOR.PURPLE;
+
+/** 构造完整牌库时用的唯一前缀：每次调用都不同，保证 id 全局唯一。 */
+let deckSerial = 0;
+
+function cardId(card, index, serial) {
+  const parts = [CARD_TEXT[card.kind], CARD_TEXT[card.color]];
+  if (isDigit(card)) parts.push(String(card.rank));
+  return `${parts.join('.')}#${serial}-${index}`;
+}
+
+/** 构造一张牌：{id, kind, color, rank}。rank 仅数字牌有值。 */
+function makeCard(kind, color, rank, index, serial) {
+  return { id: cardId({ kind, color, rank }, index, serial), kind, color, rank };
+}
+
+/**
+ * 构造完整的 37 张牌库（每次新建，避免共享可变对象）。
+ *
+ * id 里带一个每次调用都递增的 serial，因为四张普通 0（以及其它同型牌）
+ * 必须能被区分开：否则"打出一张 0 后又摸到一张 0"会让新牌的 id
+ * 与刚打出的那张相同，UI 的选中状态、AI 的着法比较都会张冠李戴。
+ */
+function createDeck() {
+  const cards = [];
+  const serial = deckSerial++;
+  let n = 0;
+  for (let rank = 0; rank <= 5; rank++) {
+    for (let copy = 0; copy < 4; copy++) cards.push(makeCard('number', 'plain', rank, n++, serial));
+  }
+  cards.push(makeCard('number', 'purple', 0, n++, serial));
+  for (let copy = 0; copy < 2; copy++) cards.push(makeCard('number', 'black', 5, n++, serial));
+  for (let copy = 0; copy < 3; copy++) cards.push(makeCard('e', 'light', null, n++, serial));
+  for (let copy = 0; copy < 3; copy++) cards.push(makeCard('e', 'dark', null, n++, serial));
+  for (let copy = 0; copy < 2; copy++) cards.push(makeCard('m', 'light', null, n++, serial));
+  for (let copy = 0; copy < 2; copy++) cards.push(makeCard('m', 'dark', null, n++, serial));
+  return cards;
+}
+
+/**
+ * 凭空造一张普通数字牌（技能「创生」用）。
+ * 它不在牌库的 37 张里，因此 id 用独立前缀，永远不与牌库里的牌撞号。
+ */
+function createExtraCard(rank) {
+  const value = Number(rank);
+  if (!Number.isInteger(value) || value < 0 || value > 5) throw new Error(`创生只能造 0-5 的数字牌：${rank}`);
+  return { id: `创生.${value}@${deckSerial++}`, kind: 'number', color: 'plain', rank: value };
+}
+
+/** 人类可读的卡名。 */
+function cardName(card) {
+  if (!card) return '（空）';
+  if (isDigit(card)) {
+    if (isPurpleZero(card)) return '紫 0';
+    if (isBlackFive(card)) return '黑 5';
+    return String(card.rank);
+  }
+  return `${isDark(card) ? '深' : '浅'}${isBomb(card) ? 'E' : 'M'}`;
+}
+
+/** 简短规则说明，供 UI 提示与 AI 使用。 */
+function cardBlurb(card) {
+  if (!card) return '空位：只能放数字牌（没有任何可压的牌）';
+  if (isDigit(card)) {
+    if (isPurpleZero(card)) return '按 0 计：只能接 1 / 2；位于顶端时全场只能出数字牌';
+    if (isBlackFive(card)) return '只能接 0；免疫炸弹，其上不能放 E';
+    // 牌库最大只有 5，所以 4 的 +2（6）不存在，4 实际只能接 5。
+    if (card.rank === 5) return '只能接 0';
+    if (card.rank === 4) return '只能接 5';
+    return `只能接 ${card.rank + 1}、${card.rank + 2}`;
+  }
+  if (isBomb(card)) {
+    return isDark(card)
+      ? '深 E：炸掉顶端 0-5（黑 5 免疫），连同自身出局'
+      : '浅 E：炸掉顶端 0-4，连同自身出局';
+  }
+  return isDark(card)
+    ? '深 M：对方下回合只能在这一列放数字牌'
+    : '浅 M：对方下回合只能放数字牌，且不能放这一列';
+}
+
+/** 卡面色彩主题（引擎无关，供 UI 使用）。 */
+function cardTheme(card) {
+  if (isDigit(card)) {
+    if (isPurpleZero(card)) return 'purple';
+    if (isBlackFive(card)) return 'black';
+    return 'plain';
+  }
+  if (isBomb(card)) return isDark(card) ? 'dark' : 'light';
+  return isDark(card) ? 'magic-dark' : 'magic-light';
+}
+
+// ─── src/engine/rules.js ─────────────────────────────────────────
+/**
+ * 规则判定层：纯函数，不修改任何入参。
+ *
+ * 所有"什么能放、什么能炸、什么被锁"的判断都集中在这里，
+ * UI、AI、模拟器都只通过这些函数理解规则，因此改规则只需改这一处。
+ */
+
+/** 已确认的规则说明书（供 UI 展示，也是本文件的判定依据）。 */
+const RULES_TEXT = Object.freeze([
+  '每列只看最上方那张牌，被压住的牌不受任何影响。',
+  '数字牌：顶端 0-4 可接 +1/+2；顶端 5（或黑 5）只能接 0；顶端紫 0 按 0 计，只能接 1/2。',
+  '浅 E 炸掉顶端 0-4；深 E 炸掉顶端 0-5，但黑 5 免疫，且黑 5 上不能放 E。',
+  '基底那张牌本身不可被炸，但它上面的牌可以。炸掉的牌与炸弹一起移出游戏。',
+  '浅 M：对方下一回合只能放数字牌，且不能放这一列。深 M：对方下一回合只能在这一列放数字牌。',
+  'M 放完立即移出游戏；效果只作用于对方紧接的那一个回合，对方若过牌也照样消耗掉。',
+  '只要任意一列顶端是紫 0，全场双方都只能放数字牌，E/M 全部禁用（优先级最高）。',
+  '无法放置或不想放置：牌堆有牌则自己抽 2 张、对方抽 1 张；牌堆空则直接换手。',
+  '牌堆空且双方连续各过 2 次牌，立即结算，手牌少者胜。',
+  '先手第一手不能放在后手指定的那一列。',
+]);
+
+/**
+ * 顶端是数字时，允许接上的数字集合。
+ *
+ * 规则：普通 0-3 接 n+1、n+2；5 / 黑 5 只接 0；紫 0 按 0 计只接 1/2。
+ * 特例：4 的 n+2 是 6，而牌库最大只有 5，所以 4 实际只能接 5（不能接 0）。
+ * @returns {number[]}
+ */
+function allowedRanksOn(card) {
+  if (!card || !isDigit(card)) return [];
+  if (isPurpleZero(card)) return [1, 2];
+  if (card.rank === 5) return [0];
+  if (card.rank === 4) return [5];
+  return [card.rank + 1, card.rank + 2];
+}
+
+/** 该列顶端（空列返回 null）。 */
+function topOf(state, col) {
+  const stack = state.bases[col];
+  if (!stack || stack.length === 0) return null;
+  return stack[stack.length - 1];
+}
+
+/** 是否满足"任意一列顶端是紫 0"的全局限锁。 */
+function hasPurpleLock(state) {
+  for (let col = 0; col < COLUMNS; col++) {
+    const top = topOf(state, col);
+    if (top && isPurpleZero(top)) return true;
+  }
+  return false;
+}
+
+// ---------------------------------------------------------------------------
+// 下回合限制：统一承载 M 魔法、禁锢、荆棘、爆弹、沉默等"作用于对手下一个回合"的限制
+//
+// 优先级（从高到低）：紫 0 全局限锁 > 禁列 > 下回合限制 > 常规规则。
+//
+// 存储：**每个玩家一个独立列表**（state.restrictions[player]）。这样：
+//   - A 身上已有的限制不会被 B 的挂载覆盖（曾经的 bug：荆棘挂上后，对手一个沉默就把它顶掉）；
+//   - 同一名玩家可以同时背着多条限制（例如被荆棘粘住之后对手又补一个沉默），
+//     任意一条禁止这次放置，这次放置就不合法。
+// 每条限制都作用到"该玩家紧接的那一个回合"，他那个回合结束时整批清掉。
+// ---------------------------------------------------------------------------
+
+/** 中立的限制对象（没有任何限制）。 */
+function noRestriction() {
+  return {
+    kind: null,
+    label: null,
+    allowedColumns: null,
+    forbiddenColumns: null,
+    digitsOnly: false,
+    forbidDigitOnCardId: null,
+    // 不受这条限制约束的牌型（例如爆弹：M 不受"只能放这一列"的约束）
+    exemptKinds: null,
+    // 被这条限制完全禁止的牌型（例如沉默：本回合不能放 E/M）
+    forbidKinds: null,
+    // 是否禁用主动技能（例如沉默：本回合不能使用主动技能）
+    forbidSkills: false,
+    setBy: null,
+    applyTo: null,
+  };
+}
+
+/** 给某个玩家挂一条限制（追加，绝不覆盖已有的）。 */
+function addRestriction(state, player, restriction) {
+  // ready=false：这条限制还没"生效过"。它要等到该玩家的回合开始才置为 ready，
+  // 只有 ready 的限制才会在该玩家回合结束时被清掉——这样在自己回合内挂给对手的限制
+  // 不会被自己的回合结束顺手清掉。
+  const entry = { ...noRestriction(), ...restriction, applyTo: player, ready: false };
+  if (!Array.isArray(state.restrictions) || state.restrictions.length !== 2) {
+    state.restrictions = [[], []];
+  }
+  state.restrictions[player].push(entry);
+  return entry;
+}
+
+/** 某个玩家当前生效的全部限制（没有就是空数组）。 */
+function restrictionsFor(state, player) {
+  if (!Array.isArray(state.restrictions)) return [];
+  return (state.restrictions[player] ?? []).filter((r) => r && r.kind);
+}
+
+/** 某个玩家的回合开始时，把他身上的限制全部标记为"已生效"。 */
+function markRestrictionsReady(state, player) {
+  if (!Array.isArray(state.restrictions)) return;
+  for (const restriction of state.restrictions[player] ?? []) {
+    if (restriction && restriction.kind) restriction.ready = true;
+  }
+}
+
+/**
+ * 某个玩家的回合结束时，清掉他身上**已经生效过**的限制。
+ * 刚挂上、还没轮到他行动的限制（ready=false）会保留到他真的用掉那个回合。
+ */
+function consumeRestrictions(state, player) {
+  if (!Array.isArray(state.restrictions)) {
+    state.restrictions = [[], []];
+    return;
+  }
+  state.restrictions[player] = (state.restrictions[player] ?? []).filter((r) => r && r.kind && !r.ready);
+}
+
+/** 由 M 魔法牌产生的限制（语义与重构前完全一致）。 */
+function restrictionFromMagic(playedPlayer, col, card) {
+  const dark = isDark(card);
+  return {
+    kind: dark ? 'magic-dark' : 'magic-light',
+    label: dark ? '深 M' : '浅 M',
+    allowedColumns: dark ? [col] : null,
+    forbiddenColumns: dark ? null : [col],
+    digitsOnly: true,
+    forbidDigitOnCardId: null,
+    setBy: playedPlayer,
+    applyTo: 1 - playedPlayer,
+  };
+}
+
+/**
+ * 单个限制对象是否禁止这次放置（内部用）。
+ *
+ * exemptKinds 列出的牌型只躲开"列约束"，不被整类禁止；
+ * 但如果这条限制同时写了 digitsOnly，exemptKinds 里的牌型也不再被它约束
+ * （爆弹就是靠这个让 M 在任意列自由落子）。
+ *
+ * @returns {{ok: true} | {ok: false, reason: string}}
+ */
+function singleRestrictionBlocks(state, restriction, col, card) {
+  const label = restriction.label ?? '限制';
+  const exempt = Boolean(restriction.exemptKinds?.includes(card.kind));
+
+  if (restriction.forbidKinds?.includes(card.kind)) {
+    return { ok: false, reason: `${label}：本回合不能放这一类牌` };
+  }
+  if (!exempt && restriction.allowedColumns && !restriction.allowedColumns.includes(col)) {
+    return { ok: false, reason: `${label}：本回合只能放在第 ${restriction.allowedColumns.map((c) => c + 1).join('、')} 列` };
+  }
+  if (!exempt && restriction.forbiddenColumns && restriction.forbiddenColumns.includes(col)) {
+    return { ok: false, reason: `${label}：本回合不能放在第 ${restriction.forbiddenColumns.map((c) => c + 1).join('、')} 列` };
+  }
+  if (restriction.digitsOnly && !isDigit(card) && !exempt) {
+    return { ok: false, reason: `${label}：本回合只能放数字牌` };
+  }
+  if (restriction.forbidDigitOnCardId && isDigit(card)) {
+    const top = topOf(state, col);
+    if (top && top.id === restriction.forbidDigitOnCardId) {
+      return { ok: false, reason: `${label}：不能放在对方刚放置的那张数字牌上` };
+    }
+  }
+  return { ok: true };
+}
+
+/**
+ * 当前行动方身上的**全部**限制是否禁止这次放置。
+ * 任意一条禁止即不合法（多条限制之间是"与"的关系）。
+ *
+ * @returns {{ok: true} | {ok: false, reason: string}}
+ */
+function restrictionBlocks(state, col, card, player = state.current) {
+  for (const restriction of restrictionsFor(state, player)) {
+    const verdict = singleRestrictionBlocks(state, restriction, col, card);
+    if (!verdict.ok) return verdict;
+  }
+  return { ok: true };
+}
+
+/** 兼容旧接口：取某个玩家身上"第一条"限制（供只关心单条限制的老代码使用）。 */
+function firstRestriction(state, player = state.current) {
+  return restrictionsFor(state, player)[0] ?? noRestriction();
+}
+
+/**
+ * 某张手牌能否放在某列顶端。
+ * 只判断"牌本身能不能放"，不包含下回合限制（那部分由 legalActions 与 applyAction 统一施加）。
+ *
+ * @returns {{ok: true, effect: object} | {ok: false, reason: string}}
+ */
+function canPlaceAt(state, player, col, card) {
+  // 开局限制：后手指定的禁列只约束先手的第一手。
+  if (
+    state.forbiddenColumn !== null &&
+    col === state.forbiddenColumn &&
+    state.turn === 1 &&
+    player === state.firstPlayer
+  ) {
+    return { ok: false, reason: `开局限制：先手第一手不能放在第 ${col + 1} 列` };
+  }
+
+  // 紫 0 全局限锁优先级最高，压过一切技能与 M 限制。
+  const digitsOnly = hasPurpleLock(state);
+
+  if (isDigit(card)) {
+    const stack = state.bases[col];
+    if (!stack || stack.length === 0) return { ok: false, reason: '空列没有可压的牌，无法放数字牌' };
+    const top = stack[stack.length - 1];
+    if (!isDigit(top)) return { ok: false, reason: `顶端是 ${isMagic(top) ? 'M' : '非数字牌'}，不能压数字牌` };
+    if (!allowedRanksOn(top).includes(card.rank)) {
+      return { ok: false, reason: `顶端是 ${top.rank}，只能接 ${allowedRanksOn(top).join(' / ')}` };
+    }
+    return { ok: true, effect: { type: 'digit' } };
+  }
+
+  if (isBomb(card)) {
+    if (digitsOnly) {
+      return { ok: false, reason: '紫 0 限锁生效：全场只能放数字牌' };
+    }
+    const stack = state.bases[col];
+    const top = topOf(state, col);
+    if (!top) return { ok: false, reason: '空列没有可炸的牌' };
+    if (!isDigit(top)) return { ok: false, reason: '顶端不是数字牌，炸弹只能炸数字' };
+    // 黑 5 免疫炸弹：既炸不掉它，也不能把 E 放在它上面。
+    if (isBlackFive(top)) {
+      return { ok: false, reason: '黑 5 免疫炸弹，且其上不能放 E' };
+    }
+    // 基底那张牌本身不可被炸：当顶端就是基底时（列高 1）不允许放炸弹。
+    if (stack.length <= 1) {
+      return { ok: false, reason: '基底不可被炸，此列没有可炸的牌' };
+    }
+    if (card.color !== 'dark' && top.rank > 4) {
+      return { ok: false, reason: '浅 E 只能炸 0-4（普通 5 炸不动）' };
+    }
+    return {
+      ok: true,
+      effect: { type: 'bomb', destroyedRank: top.rank, destroyedColor: top.color },
+    };
+  }
+
+  if (isMagic(card)) {
+    if (digitsOnly) {
+      return { ok: false, reason: '紫 0 限锁生效：全场只能放数字牌' };
+    }
+    const top = topOf(state, col);
+    if (!top) return { ok: false, reason: '空列没有数字，魔法需要放在数字牌上' };
+    if (!isDigit(top)) return { ok: false, reason: '魔法需要放在数字牌上' };
+    return {
+      ok: true,
+      effect: { type: 'magic', variant: isDark(card) ? 'dark' : 'light' },
+    };
+  }
+
+  return { ok: false, reason: '未知卡牌类型' };
+}
+
+/**
+ * 组合判定：牌本身能不能放 + 是否被下回合限制禁止。
+ */
+function canPlaceWithRestriction(state, player, col, card) {
+  const base = canPlaceAt(state, player, col, card);
+  if (!base.ok) return base;
+  const blocked = restrictionBlocks(state, col, card, player);
+  if (!blocked.ok) return blocked;
+  return base;
+}
+
+/**
+ * 枚举某个玩家当前的全部合法着法（永远包含"过牌"）。
+ */
+function legalActions(state, player = state.current) {
+  const actions = [];
+  const hand = state.hands[player] ?? [];
+  for (let col = 0; col < COLUMNS; col++) {
+    for (let handIndex = 0; handIndex < hand.length; handIndex++) {
+      const card = hand[handIndex];
+      const verdict = canPlaceWithRestriction(state, player, col, card);
+      if (verdict.ok) {
+        actions.push({ player, type: 'place', col, handIndex, card, effect: verdict.effect });
+      }
+    }
+  }
+  actions.push({
+    player,
+    type: 'pass',
+    card: null,
+    reason: actions.length > 0 ? '可放置但选择不放置' : '没有任何合法放置',
+  });
+  return actions;
+}
+
+/** 是否存在除过牌以外的合法着法。 */
+function hasLegalPlacement(state, player = state.current) {
+  return legalActions(state, player).some((a) => a.type === 'place');
+}
+
+/** 文案：着法的人类可读描述。 */
+function describeAction(action, state) {
+  if (!action) return '—';
+  if (action.type === 'pass') return `过牌（${action.reason ?? ''}）`;
+  const top = topOf(state, action.col);
+  return `第 ${action.col + 1} 列（顶端 ${top ? top.rank : '空'}）放置 ${action.card.rank ?? ''}`;
+}
+
+// ─── src/skills/registry.js ──────────────────────────────────────
+/**
+ * 技能注册表。
+ *
+ * 设计目标：加一个新技能 = 新增一个定义并注册，不用改引擎主流程。
+ *
+ * 每个技能定义可提供以下钩子（全部可选）：
+ *   onGameStart(ctx, state)            开局时执行一次（在选技之后、禁列之前）
+ *   extraActions(ctx, state, player)   提供额外的合法着法（主动技）
+ *   applyAction(ctx, state, action)    执行自己的着法（就地修改传入的 state）
+ *   applyChoice(ctx, state, choice)    执行"选牌"结果（就地修改传入的 state）
+ *   legalKinds(ctx, state, player)     额外禁止某些牌型（例如威严）
+ *   drawOnPass(ctx, state, player)     过牌时的抽牌方案
+ *   onPlaced(ctx, state, action)       某张牌落桌后触发（例如荆棘）
+ *   onTurnEnd(ctx, state, player)      回合结束时触发
+ *
+ * 约定：钩子直接修改传入的 state（引擎已经为这一次着法克隆好了新状态），
+ * 返回值只在需要"追加信息"时使用。
+ */
+
+/** @typedef {{id:string, name:string, type:'active'|'passive', maxUses:number, text:string, hooks:object}} SkillDef */
+
+const registry = new Map();
+
+/** 注册一个技能。 */
+function defineSkill(def) {
+  if (!def || !def.id) throw new Error('技能定义必须有 id');
+  if (registry.has(def.id)) throw new Error(`技能 id 重复：${def.id}`);
+  registry.set(def.id, {
+    type: def.type ?? 'passive',
+    maxUses: def.maxUses ?? (def.type === 'active' ? 1 : 0),
+    hooks: def.hooks ?? {},
+    ...def,
+  });
+  return def.id;
+}
+
+/** 取技能定义。 */
+function getSkill(id) {
+  return registry.get(id) ?? null;
+}
+
+/** 全部技能 id（按注册顺序，供随机抽取与测试使用）。 */
+function allSkillIds() {
+  return [...registry.keys()];
+}
+
+/** 全部技能定义。 */
+function allSkills() {
+  return [...registry.values()];
+}
+
+/** 用给定随机源打乱技能 id 列表（供开局随机抽候选）。 */
+function shuffleSkillIds(ids, rng) {
+  const out = [...ids];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = rng.int(i + 1);
+    const tmp = out[i];
+    out[i] = out[j];
+    out[j] = tmp;
+  }
+  return out;
+}
+
+/**
+ * 把一条技能 id 列表整理成可供引擎查询的"技能上下文"。
+ *
+ * 优先级：紫 0 全局限锁 > 禁列 > 下回合限制 > 技能 > 常规规则。
+ * 技能之间冲突时按座位顺序结算（先手优先），所以这里按 (先手, 后手) 排序。
+ */
+function skillsContext(skillIds) {
+  const entries = [];
+  const consider = (player) => {
+    const id = skillIds?.[player];
+    const skill = id ? getSkill(id) : null;
+    if (skill) entries.push({ player, skill });
+  };
+  consider(0);
+  consider(1);
+  return {
+    entries,
+    has(skillId) {
+      return entries.some((e) => e.skill.id === skillId);
+    },
+    of(player) {
+      return entries.filter((e) => e.player === player).map((e) => e.skill);
+    },
+  };
+}
+
+/** 只给测试用：清空注册表（正常游戏流程不会调用）。 */
+function _clearRegistry() {
+  registry.clear();
+}
+
+// ─── src/skills/skills.js ────────────────────────────────────────
+/**
+ * 九个技能的实现。
+ *
+ * 与引擎的接口约定（由 game.js 保证）：
+ *   - 钩子里的 state 已经是"本次着法的克隆体"，可以直接就地修改。
+ *   - 主动技通过 extraActions 提供着法，通过 applyAction 执行。
+ *   - 需要玩家选牌的技能用 setPendingChoice 挂起，等 chooseCard 着法回来再 applyChoice。
+ *   - 技能优先级低于紫 0 限锁与禁列：那两项由 rules.js 判定，技能只做"额外的限制"。
+ *
+ * 规则裁定（来自需求确认）：
+ *   - 弃牌 = 已出局（复用 outOfPlay，不新增区域）
+ *   - 消却不能移除基底（该列只剩基底时不可选）
+ *   - 睡眠不算过牌：双方都不抽牌；但为避免僵局，仍计入"连续跳过"用于结算
+ *   - 选牌由持牌的人自己选
+ *   - 汇流从全部手牌里选 1 张交给对手
+ */
+
+
+
+/** 该列是否"只剩基底"（基底不可被炸，也不可被消却）。 */
+const onlyBase = (state, col) => state.bases[col].length <= 1;
+
+// ---------------------------------------------------------------------------
+// 消却：免费移除任意牌堆顶的一张牌（不占行动）
+// ---------------------------------------------------------------------------
+defineSkill({
+  id: 'xiaoque',
+  name: '消却',
+  type: 'active',
+  maxUses: 1,
+  text: '在你的回合，立刻移除任意牌堆顶的一张牌（不能移除基底）。不占用行动。',
+  hooks: {
+    extraActions(_ctx, state, player) {
+      const actions = [];
+      for (let col = 0; col < COLUMNS; col++) {
+        if (onlyBase(state, col)) continue;
+        actions.push({ player, type: 'skill', skill: 'xiaoque', col, card: null, label: `消却：移除第 ${col + 1} 列顶端` });
+      }
+      return actions;
+    },
+    applyAction(_ctx, state, action, log) {
+      const stack = state.bases[action.col];
+      const removed = stack.length > 1 ? stack.pop() : null;
+      if (removed) state.outOfPlay.push(removed);
+      log.removed = removed ? [removed] : [];
+      log.turnEnds = false; // 不占用行动
+      return true;
+    },
+  },
+});
+
+// ---------------------------------------------------------------------------
+// 看破：观看对方手牌（不占行动，每局限 2 次）
+// ---------------------------------------------------------------------------
+defineSkill({
+  id: 'kanpo',
+  name: '看破',
+  type: 'active',
+  maxUses: 2,
+  text: '在你的回合，你可以观看对方的手牌。不会占用你的行动。',
+  hooks: {
+    extraActions(_ctx, state, player) {
+      // 对方没手牌就没什么可看的
+      const target = 1 - player;
+      if ((state.hands[target] ?? []).length === 0) return [];
+      return [{ player, type: 'skill', skill: 'kanpo', col: null, card: null, label: '看破：观看对方手牌' }];
+    },
+    applyAction(_ctx, state, action, log) {
+      // 看破只是"当场看一眼"：不写入任何持续状态，只留一条战报。
+      // 看过的牌不保留、不追踪——对方之后摸到什么牌，你依然不知道。
+      const target = 1 - action.player;
+      log.revealed = (state.hands[target] ?? []).length;
+      log.turnEnds = false; // 不占用行动：看破之后还能照常出牌
+      return true;
+    },
+  },
+});
+
+// ---------------------------------------------------------------------------
+// 禁锢：对方下回合只能在这一列放数字牌（占用行动）
+// ---------------------------------------------------------------------------
+defineSkill({
+  id: 'jinggu',
+  name: '禁锢',
+  type: 'active',
+  maxUses: 1,
+  text: '选定一个牌堆，对方下回合只能在这里放置牌，且只能放数字牌。占用行动。',
+  hooks: {
+    extraActions(_ctx, state, player) {
+      return Array.from({ length: COLUMNS }, (_unused, col) => ({
+        player,
+        type: 'skill',
+        skill: 'jinggu',
+        col,
+        card: null,
+        label: `禁锢：把对手锁在第 ${col + 1} 列`,
+      }));
+    },
+    applyAction(_ctx, state, action, log) {
+      log.restriction = addRestriction(state, 1 - action.player, {
+        kind: 'skill-jinggu',
+        label: '禁锢',
+        allowedColumns: [action.col],
+        digitsOnly: true,
+        setBy: action.player,
+      });
+      log.turnEnds = true;
+      return true;
+    },
+  },
+});
+
+// ---------------------------------------------------------------------------
+// 睡眠：跳过这次行动，直接换手（每局两次）
+// ---------------------------------------------------------------------------
+defineSkill({
+  id: 'shuimian',
+  name: '睡眠',
+  type: 'active',
+  maxUses: 2,
+  text: '跳过一次行动，直接轮到对方（双方都不抽牌）。每局可用两次。',
+  hooks: {
+    extraActions(_ctx, state, player) {
+      return [{ player, type: 'skill', skill: 'shuimian', col: null, card: null, label: '睡眠：跳过这次行动' }];
+    },
+    applyAction(_ctx, state, _action, log) {
+      // 不算过牌：双方都不抽牌。但仍计入"连续跳过"，避免双方都靠它拖成僵局。
+      state.consecutivePasses += 1;
+      log.skipped = true;
+      log.turnEnds = true;
+      return true;
+    },
+  },
+});
+
+// ---------------------------------------------------------------------------
+// 观星：开局随机拿走对方 2 张手牌，然后交 2 张手牌给对方
+// ---------------------------------------------------------------------------
+defineSkill({
+  id: 'guanxing',
+  name: '观星',
+  type: 'passive',
+  maxUses: 0,
+  text: '游戏开始时，你随机获得对方 2 张牌，然后选择 2 张手牌交给对方。',
+  hooks: {
+    /**
+     * 开局：
+     *   1. 从对方手里随机抽走 2 张，放进自己手里（相当于"抢"）→ 自己 7 张、对方 3 张；
+     *   2. 挂起选牌，让发动者从这 7 张里挑 2 张交给对方。
+     * 一进一出正好 2 张，双方手牌数回到 5，只是把对方的 2 张换成了自己的 2 张。
+     */
+    onGameStart(_ctx, state, player, api, rng) {
+      const target = 1 - player;
+      const taken = [];
+      const times = Math.min(2, state.hands[target].length);
+      for (let i = 0; i < times; i++) {
+        const size = state.hands[target].length;
+        const index = rng && typeof rng.int === 'function' ? rng.int(size) : Math.floor(Math.random() * size);
+        taken.push(state.hands[target].splice(index, 1)[0]);
+      }
+      state.hands[player].push(...taken);
+      state.lastGuanxing = { by: player, taken: taken.map((c) => ({ ...c })) };
+
+      api.setPendingChoice(state, {
+        player,
+        kind: 'giveToOpponent',
+        count: 2,
+        picked: [],
+        // 标记为"开局阶段的选牌"：引擎不会把它当成一个回合
+        //（否则会吃掉先手第一手，并让禁列判定失效）
+        phase: 'opening',
+        ready: false,
+        note: '观星：选择 2 张手牌交给对方',
+      });
+    },
+    applyChoice(_ctx, state, choice) {
+      const target = 1 - choice.player;
+      for (const id of choice.cardIds) {
+        const index = state.hands[choice.player].findIndex((c) => c.id === id);
+        if (index < 0) continue;
+        state.hands[target].push(state.hands[choice.player].splice(index, 1)[0]);
+      }
+      state.pendingChoice = null;
+      return true;
+    },
+    /**
+     * 观星需要"一次选 2 张"，所以这里把候选全部标出来，
+     * 引擎会在选牌时校验选中的张数是否等于 count。
+     */
+    requiredCount() {
+      return 2;
+    },
+  },
+});
+
+// ---------------------------------------------------------------------------
+// 爆弹：你放下 E 之后，对方下回合所有的牌都只能放在那一列
+// ---------------------------------------------------------------------------
+defineSkill({
+  id: 'baodan',
+  name: '爆弹',
+  type: 'passive',
+  maxUses: 0,
+  text: '你放置 E 的下一回合，对方的牌只能在那个位置放置。',
+  hooks: {
+    /**
+     * E 落桌后给对手挂一条"列限制"，把**所有牌型**都锁到那一列。
+     *   - digitsOnly:false —— 写 true 会变成"本回合只能放数字牌"，那是禁掉 E/M 而不是锁列；
+     *   - exemptKinds:null —— 没有任何牌型豁免（数字牌 / E / M 全部只能去那一列）。
+     * 被炸掉的牌不会留在牌桌上，所以只有真正"放上去"的 E 才触发。
+     */
+    onPlaced(_ctx, state, action) {
+      if (state.skills?.[action.player] !== 'baodan') return;
+      if (!action.card || action.card.kind !== 'e') return;
+
+      addRestriction(state, 1 - action.player, {
+        kind: 'baodan-lock',
+        label: '爆弹',
+        allowedColumns: [action.col],
+        digitsOnly: false,
+        exemptKinds: null,
+        setBy: action.player,
+      });
+    },
+  },
+});
+
+// ---------------------------------------------------------------------------
+// 沉默：对方下回合不能放 E/M，也不能使用主动技能（不占用行动）
+// ---------------------------------------------------------------------------
+defineSkill({
+  id: 'chenmo',
+  name: '沉默',
+  type: 'active',
+  maxUses: 2,
+  text: '在你的回合，对方的下一回合不能放置 E/M，也不能使用主动技能。不会占用你的行动。',
+  hooks: {
+    extraActions(_ctx, state, player) {
+      return [{ player, type: 'skill', skill: 'chenmo', col: null, card: null, label: '沉默：对方下回合不能放 E/M、不能用主动技' }];
+    },
+    applyAction(_ctx, state, action, log) {
+      addRestriction(state, 1 - action.player, {
+        kind: 'silence',
+        label: '沉默',
+        // 只管 E/M：数字牌照常放，所以不用 digitsOnly
+        digitsOnly: false,
+        forbidKinds: ['e', 'm'],
+        // 主动技能一并禁用（引擎在 playerActions 里整段跳过主动技）
+        forbidSkills: true,
+        setBy: action.player,
+      });
+      log.silenced = log.player;
+      // 不占用行动：沉默之后仍然是自己的回合，照常出牌。
+      // 限制挂在对手的槽里（且 ready=false），所以自己继续行动不会把它清掉。
+      log.turnEnds = false;
+      return true;
+    },
+  },
+});
+
+// ---------------------------------------------------------------------------
+// 创生：凭空给对方塞一张指定数字牌（占用行动）
+// ---------------------------------------------------------------------------
+defineSkill({
+  id: 'chuangsheng',
+  name: '创生',
+  type: 'active',
+  maxUses: 1,
+  text: '在你的回合，你可以选择一张 {0，1，2，3，4，5} 凭空加入对方的手牌。占用行动。',
+  hooks: {
+    extraActions(_ctx, state, player) {
+      // 六个数字各一个着法：由发动者自己挑要送给对方哪一张
+      return Array.from({ length: 6 }, (_unused, rank) => ({
+        player,
+        type: 'skill',
+        skill: 'chuangsheng',
+        col: null,
+        card: null,
+        rank,
+        label: `创生：把 ${rank} 加入对方手牌`,
+      }));
+    },
+    applyAction(_ctx, state, action, log) {
+      const rank = action.rank;
+      if (!Number.isInteger(rank) || rank < 0 || rank > 5) throw new Error(`创生只能造 0-5 的数字牌：${rank}`);
+      const target = 1 - action.player;
+      const created = createExtraCard(rank);
+      state.hands[target].push(created);
+      // 这张牌不在牌库的 37 张里：登记到 createdCards，牌数守恒检查把它算进去
+      state.createdCards = [...(state.createdCards ?? []), created];
+      log.created = [created];
+      log.createdFor = target;
+      return true; // 占用行动
+    },
+  },
+});
+
+// ---------------------------------------------------------------------------
+// 威严：只要你没放过 E/M，对方也不能放 E/M
+// ---------------------------------------------------------------------------
+defineSkill({
+  id: 'weiyan',
+  name: '威严',
+  type: 'passive',
+  maxUses: 0,
+  text: '本局游戏中，如果你没有放置过 E 或 M，对方也不能放置 E 或 M。',
+  hooks: {
+    legalKinds(_ctx, state, player) {
+      // 与 UI 的"发动中/已失效"共用同一份判断，避免两处逻辑走偏
+      const status = weiyanStatus(state);
+      if (!status || status.holder === player) return null;
+      if (!status.active) return null;
+      return ['number'];
+    },
+  },
+});
+
+/**
+ * 威严的当前状态（供 UI 显示"发动中 / 已失效"）。
+ *
+ * @returns {null | {holder:number, active:boolean, blockedPlayer:number}}
+ *   holder 是持有者；active=true 表示保护仍然生效（持有者还没放过 E/M）；
+ *   blockedPlayer 是当前被限制的那一方（持有者自己不受影响）。
+ */
+function weiyanStatus(state) {
+  const holder = state.skills?.findIndex((id) => id === 'weiyan') ?? -1;
+  if (holder < 0) return null;
+  return {
+    holder,
+    active: (state.emPlaced?.[holder] ?? 0) === 0,
+    blockedPlayer: 1 - holder,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// 甩手：丢弃一张手牌（占用行动）
+// ---------------------------------------------------------------------------
+defineSkill({
+  id: 'shuaishou',
+  name: '甩手',
+  type: 'active',
+  maxUses: 1,
+  text: '在你的回合，把一张手牌丢弃（进入已出局区）。占用行动。丢弃最后一张手牌时等同于出完手牌，立即获胜。',
+  hooks: {
+    extraActions(_ctx, state, player) {
+      if (state.hands[player].length === 0) return [];
+      return [{ player, type: 'skill', skill: 'shuaishou', col: null, card: null, label: '甩手：丢弃一张手牌', needsCard: true }];
+    },
+    applyAction(_ctx, state, action, log, api) {
+      // 引擎已经按 handIndex 把这张牌从手牌里取出来了，这里只需要把它丢进已出局区。
+      const carried = action.card ?? api.takeFromHand(state, action.player, action.cardId);
+      if (!carried) return false;
+      state.outOfPlay.push(carried);
+      log.discarded = [carried];
+      log.turnEnds = true;
+      return true;
+    },
+  },
+});
+
+// ---------------------------------------------------------------------------
+// 荆棘：对方不能在你刚放置的数字牌上立刻放数字牌
+// ---------------------------------------------------------------------------
+defineSkill({
+  id: 'jingji',
+  name: '荆棘',
+  type: 'passive',
+  maxUses: 0,
+  text: '对方不能在你刚才放置的数字牌上立刻放置数字牌。',
+  hooks: {
+    onPlaced(ctx, state, action) {
+      if (!isDigit(action.card)) return null;
+      // 只记录"带荆棘的玩家"放的牌
+      if (state.skills?.[action.player] !== 'jingji') return null;
+      const target = 1 - action.player;
+      const applied = addRestriction(state, target, {
+        kind: 'skill-jingji',
+        label: '荆棘',
+        digitsOnly: false,
+        forbidDigitOnCardId: action.card.id,
+        setBy: action.player,
+      });
+      void ctx;
+      return applied;
+    },
+  },
+});
+
+// ---------------------------------------------------------------------------
+// 汇流：过牌时改为自己抽 3 张，然后交一张手牌给对手
+// ---------------------------------------------------------------------------
+defineSkill({
+  id: 'huiliu',
+  name: '汇流',
+  type: 'passive',
+  maxUses: 0,
+  text: '你过牌时，如果牌堆还有牌，改为你抽 3 张牌，然后选择这 3 张牌中的一张牌交给对手。',
+  hooks: {
+    drawOnPass(_ctx, state, player) {
+      if (state.skills?.[player] !== 'huiliu') return null;
+      if (state.deck.length === 0) return null;
+      // 抽 3 张；不足 3 张时按实际数量抽
+      return { self: Math.min(3, state.deck.length), opponent: 0, thenGiveOne: true };
+    },
+    /**
+     * 过牌抽完之后挂起"从刚抽的 3 张里交一张给对手"的选择。
+     * 关键区别（相对旧版）：候选只限**这次抽到的牌**，不能从整副手牌里挑垃圾送人——
+     * 那正是让汇流强度失控的那条路径。
+     */
+    afterPassDraw(_ctx, state, player, api, plan) {
+      if (!plan || !plan.thenGiveOne) return false;
+      const hand = state.hands[player] ?? [];
+      // 刚抽到的牌 = 手牌末尾的 plan.self 张（drawCards 是 push 进手牌）
+      const drawnIds = hand.slice(Math.max(0, hand.length - plan.self)).map((c) => c.id);
+      if (drawnIds.length === 0) return false;
+      api.setPendingChoice(state, {
+        player,
+        kind: 'giveToOpponent',
+        count: 1,
+        picked: [],
+        // 只允许从这次抽到的牌里选
+        candidateIds: drawnIds,
+        ready: false,
+        note: '汇流：从刚抽到的 3 张里选 1 张交给对手',
+      });
+      return true;
+    },
+    applyChoice(_ctx, state, choice, api) {
+      const picked = choice.cardIds[0];
+      const allowed = choice.candidateIds ?? null;
+      if (allowed && !allowed.includes(picked)) return false;
+      const card = api.takeFromHand(state, choice.player, picked);
+      if (card) state.hands[1 - choice.player].push(card);
+      state.pendingChoice = null;
+      return true;
+    },
+  },
+});
+
+/**
+ * 某个数字牌"别人能接到它上面"的落点数（越小越卡手）。
+ *
+ * 数学参考（本报告里的实测口径）：
+ *   0 → 6 张（任何 4/5/黑 5 都能接 0，加上 0 自己那一档）
+ *   1 → 5 张
+ *   2 → 9 张
+ *   3 / 4 / 5 → 8 张
+ * 注意这是"牌库里有几张牌能压住它"，因此在给定牌面下更准确的算法是
+ * 直接数当前列顶允许接它的列数（见 scoreCardForOpponent）。
+ */
+const LANDING_SPOTS = Object.freeze({ 0: 6, 1: 5, 2: 9, 3: 8, 4: 8, 5: 8 });
+
+/**
+ * 某个数字在当前牌面上有几个落点（有多少列顶端能接它）。
+ * 越小越"卡手"——这是"塞给对手哪张牌最难受"的核心指标。
+ */
+function countLandingSpots(state, rank) {
+  let count = 0;
+  for (const stack of state.bases ?? []) {
+    const top = stack[stack.length - 1];
+    if (!top || top.kind !== 'number') continue;
+    if (allowedRanksOn(top).includes(rank)) count += 1;
+  }
+  return count;
+}
+
+/**
+ * 挑一张"最适合塞给对手"的牌（汇流的交牌 / 创生的造牌共用）。
+ *
+ * 优先级：
+ *   1. 当前场上**实际放不出去**的普通数字牌（落点数为 0）——塞给对手就是纯负担；
+ *   2. 紫 0 限锁生效时，E/M 也打不出去，这时优先给 E/M；
+ *   3. 否则按"当前落点数"从少到多给普通数字牌（落点越少越卡手）；
+ *   4. 都不适用时，退回静态落点数表（越少越优先）。
+ *
+ * @param {object} state
+ * @param {Array} cards 候选牌
+ * @returns {object|null} 选中的牌
+ */
+function pickWorstCardForOpponent(state, cards) {
+  if (!cards || cards.length === 0) return null;
+
+  const scored = cards.map((card) => {
+    if (card.kind !== 'number') {
+      // E/M：平时留着（对对手有用），紫 0 限锁下反而变成废牌
+      return { card, score: hasPurpleLock(state) ? -100 : 100 };
+    }
+    const spots = countLandingSpots(state, card.rank);
+    return { card, score: spots * 10 + (LANDING_SPOTS[card.rank] ?? 8) };
+  });
+
+  scored.sort((a, b) => a.score - b.score);
+  return scored[0].card;
+}
+
+// ---------------------------------------------------------------------------
+// 供引擎使用的小工具（放在技能模块里，避免污染引擎）
+// ---------------------------------------------------------------------------
+
+/** 某玩家是否拥有某个技能。 */
+const hasSkill = (state, player, skillId) => state.skills?.[player] === skillId;
+
+/** 找出"拥有指定技能"的玩家（没有则 -1）。 */
+function holderOf(state, skillId) {
+  if (!state.skills) return -1;
+  return state.skills.findIndex((id) => id === skillId);
+}
+
+// ─── src/engine/game.js ──────────────────────────────────────────
+/**
+ * 游戏状态机：创建对局、执行着法、判定胜负。
+ *
+ * 设计约定：
+ *  - applyAction 永不修改传入的 state，总是返回全新的 state（浅层结构化克隆）。
+ *  - 所有随机来源于外部注入的 RandomSource，因此对局可完整复现。
+ *  - 引擎是纯逻辑，不依赖 DOM / 计时器 / 网络，可无头运行。
+ *
+ * 技能系统：
+ *  - state.skills 记录每人的技能 id；技能通过 src/skills/registry.js 的钩子接入。
+ *  - 着法类型：place（放牌）、pass（过牌）、skill（主动技）、chooseCard（交互式选牌）。
+ *  - 优先级：紫 0 全局限锁 > 禁列 > 下回合限制 > 技能 > 常规规则。
+ */
+
+
+
+
+// 技能定义必须随引擎一起加载：否则 allSkillIds() 为空，选技阶段会拿到 0 个候选。
+// （曾经因为漏了这行，只有显式 import 过 skills.js 的测试才能跑技能模式。）
+
+const PLAYERS = Object.freeze([0, 1]);
+const DEFAULT_TURN_LIMIT = 900;
+/** 记录最近若干手，供 AI 判断"谁在推进局面"。 */
+const HISTORY_LIMIT = 8;
+/** 开局随机给出的候选技能数量。 */
+const DRAFT_OPTIONS = 3;
+
+const other = (player) => 1 - player;
+
+/**
+ * @typedef {object} GameState
+ * @property {Array} deck                 抽牌堆
+ * @property {Array<Array>} bases         3 列牌堆（每列自下而上）
+ * @property {Array<Array>} hands         两名玩家的手牌
+ * @property {Array} outOfPlay            已移出游戏的牌（弃牌也放这里）
+ * @property {number} current             当前行动方
+ * @property {number} turn                回合序号（从 1 开始）
+ * @property {number} firstPlayer         先手
+ * @property {Array<string|null>} skills  每人选定的技能 id
+ * @property {Array<number>} skillUses    每人已使用主动技的次数（按玩家记，不是按技能）
+ * @property {Array<number>} usesById     记录每个技能已用次数（用于"每局限 N 次"）
+ * @property {Array<number>} emPlaced     每人已放置的 E/M 张数（威严用）
+ * @property {Array<{turn:number, cardId:string|null}>} lastDigit 每人最近放置的数字牌
+ * @property {{options: string[], picks: Array<number|null>}|null} draft 选技阶段
+ * @property {{player:number, kind:string, count:number, ready:boolean, note:string}|null} pendingChoice
+ * @property {object} restriction         作用于"当前行动方本回合"的下回合限制
+ */
+
+/**
+ * 状态构造的唯一入口：createGame、clone、以及各处"补字段"都走这里。
+ * 以后新增状态字段只需要改这一个函数，不会出现"某处克隆漏了字段"的问题。
+ */
+function newState(base = {}) {
+  const firstPlayer = base.firstPlayer ?? 0;
+  return {
+    version: base.version ?? 0,
+    deck: base.deck ? base.deck.slice() : [],
+    bases: base.bases ? base.bases.map((stack) => stack.slice()) : [],
+    hands: base.hands ? [base.hands[0].slice(), base.hands[1].slice()] : [[], []],
+    outOfPlay: base.outOfPlay ? base.outOfPlay.slice() : [],
+    current: base.current ?? firstPlayer,
+    turn: base.turn ?? 1,
+    firstPlayer,
+    lastPlayer: base.lastPlayer ?? other(firstPlayer),
+    forbiddenColumn: base.forbiddenColumn ?? null,
+    restriction: base.restriction ? { ...base.restriction } : noRestriction(),
+    // 每个玩家一个独立的下回合限制槽：互不覆盖，同一个人可以同时背多条
+    restrictions: Array.isArray(base.restrictions)
+      ? [base.restrictions[0].map((r) => ({ ...r })), base.restrictions[1].map((r) => ({ ...r }))]
+      : [[], []],
+    consecutivePasses: base.consecutivePasses ?? 0,
+    history: base.history ? base.history.slice() : [],
+    turnLimit: base.turnLimit ?? DEFAULT_TURN_LIMIT,
+    result: base.result ? { ...base.result } : { over: false, winner: null, reason: null },
+    lastAction: base.lastAction ?? null,
+    // ---- 技能相关 ----
+    skills: base.skills ? [...base.skills] : [null, null],
+    skillUses: base.skillUses ? [...base.skillUses] : [0, 0],
+    usesById: base.usesById ? { ...base.usesById } : {},
+    emPlaced: base.emPlaced ? [...base.emPlaced] : [0, 0],
+    lastDigit: base.lastDigit
+      ? base.lastDigit.map((entry) => (entry ? { ...entry } : null))
+      : [null, null],
+    draft: base.draft
+      ? {
+        options: [...(base.draft.options ?? [])],
+        available: [...(base.draft.available ?? base.draft.options ?? [])],
+        order: [...(base.draft.order ?? [])],
+        picks: [...(base.draft.picks ?? [])],
+      }
+      : null,
+    pendingChoice: base.pendingChoice ? { ...base.pendingChoice } : null,
+    // 创生造出来的牌（不属于牌库的 37 张）：登记在这里，牌数守恒检查把它算进去
+    createdCards: base.createdCards ? base.createdCards.map((c) => ({ ...c })) : [],
+    // 观星开局抢到的牌（仅用于调试/展示，不影响规则判定）
+    lastGuanxing: base.lastGuanxing ? { ...base.lastGuanxing } : null,
+  };
+}
+
+function buildDeckState(rng) {
+  const deck = shuffle(createDeck(), rng);
+  const bases = [];
+  for (let i = 0; i < BASE_COUNT; i++) {
+    // 基底只从"数字牌"里抽（普通 0-5 / 紫 0 / 黑 5 都可以）。
+    const index = deck.findIndex((c) => isDigit(c));
+    bases.push([deck.splice(index, 1)[0]]);
+  }
+  const hands = [[], []];
+  for (let i = 0; i < HAND_SIZE; i++) {
+    for (const p of PLAYERS) hands[p].push(deck.pop());
+  }
+  return { deck, bases, hands };
+}
+
+/**
+ * 开新局。
+ * @param {{seed?: number|string, rng?: object, firstPlayer?: number, lastPlayer?: number,
+ *          turnLimit?: number, bases?: Array, hands?: Array, deck?: Array,
+ *          withSkills?: boolean, skills?: Array<string|null>}} [options]
+ *
+ * withSkills 为 true 时进入"选技阶段"：随机抽 DRAFT_OPTIONS 个技能，由后手先选。
+ */
+function createGame(options = {}) {
+  const rng = options.rng ?? createRng(typeof options.seed === 'string' ? hashSeed(options.seed) : (options.seed ?? Date.now()));
+  const draw = options.deck && options.bases && options.hands
+    ? { deck: options.deck, bases: options.bases, hands: options.hands }
+    : buildDeckState(rng);
+  const firstPlayer = options.firstPlayer ?? rng.int(2);
+  const lastPlayer = options.lastPlayer ?? other(firstPlayer);
+
+  const state = newState({
+    ...draw,
+    firstPlayer,
+    lastPlayer,
+    turnLimit: options.turnLimit ?? DEFAULT_TURN_LIMIT,
+  });
+
+  if (options.skills) {
+    // 直接指定技能（测试与"固定阵容"模式用），跳过选技阶段。
+    state.skills = [options.skills[0] ?? null, options.skills[1] ?? null];
+    runGameStartHooks(state, rng);
+    // 开局钩子可能挂起交互式选牌（观星）：把行动权交给需要选牌的人
+    if (state.pendingChoice) state.current = state.pendingChoice.player;
+    return state;
+  }
+
+  if (options.withSkills) {
+    const candidates = shuffleSkillIds(allSkillIds(), rng).slice(0, DRAFT_OPTIONS);
+    state.draft = {
+      options: candidates,
+      // available 是"还没被选走"的候选：每有一人选走就从这里移除，
+      // 保证同一个技能不会被两人同时拿到。
+      available: [...candidates],
+      // 后手先选：order 是"选择顺序"（玩家号），picks 按顺序追加已选玩家
+      order: [lastPlayer, firstPlayer],
+      picks: [],
+    };
+    state.current = lastPlayer;
+  }
+  return state;
+}
+
+function hashSeed(text) {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+/** 后手指定"先手第一手禁放"的列。 */
+function setForbiddenColumn(state, col) {
+  if (state.forbiddenColumn !== null || state.result.over) return state;
+  if (!Number.isInteger(col) || col < 0 || col >= COLUMNS) throw new Error(`非法列：${col}`);
+  const next = { ...newState(state), forbiddenColumn: col };
+  next.version = state.version + 1;
+  return next;
+}
+
+/** 给后手 AI 选禁放列：简单启发式，避免在对手刚开局时白送一列。 */
+function suggestForbiddenColumn(state) {
+  let best = 0;
+  let bestScore = -Infinity;
+  for (let col = 0; col < COLUMNS; col++) {
+    const top = topOf(state, col);
+    const score = top ? (top.rank >= 2 && top.rank <= 4 ? 2 : top.rank <= 1 ? 1 : 0.5) : 0;
+    if (score > bestScore) {
+      bestScore = score;
+      best = col;
+    }
+  }
+  return best;
+}
+
+function clone(state) {
+  return newState(state);
+}
+
+function drawCards(state, player, count) {
+  const drawn = [];
+  for (let i = 0; i < count && state.deck.length > 0; i++) {
+    const card = state.deck.pop();
+    state.hands[player].push(card);
+    drawn.push(card);
+  }
+  return drawn;
+}
+
+// ---------------------------------------------------------------------------
+// 技能接入
+// ---------------------------------------------------------------------------
+
+/** 当前技能上下文（按先手优先排序，技能冲突时先手先生效）。 */
+function skillContextOf(state) {
+  return skillsContext(state.skills ?? [null, null]);
+}
+
+/**
+ * 某玩家本回合允许放置的牌型；返回 null 表示不额外限制。
+ *
+ * 注意：这里只处理"技能带来的额外禁牌"（例如威严）与紫 0 全局限锁。
+ * "下回合限制只许放数字牌"不在这里处理——那条属于限制层，
+ * 由 legalActions 统一做限制过滤。
+ */
+function legalKindsFor(state, player) {
+  if (hasPurpleLock(state)) return ['number'];
+  // 限制层整类禁掉的牌型（沉默：本回合不能放 E/M）。
+  // 可能同时有多条这类限制，取并集。
+  const banned = new Set();
+  for (const restriction of restrictionsFor(state, player)) {
+    for (const kind of restriction.forbidKinds ?? []) banned.add(kind);
+  }
+  if (banned.size > 0) {
+    return ['number', 'e', 'm'].filter((k) => !banned.has(k));
+  }
+  const context = skillContextOf(state);
+  for (const entry of context.entries) {
+    const hook = entry.skill.hooks.legalKinds;
+    if (!hook) continue;
+    const kinds = hook(context, state, player, entry.player);
+    if (kinds) return kinds;
+  }
+  return null;
+}
+
+/** 某个玩家本回合是否被禁止使用主动技能（沉默）。 */
+function skillsForbidden(state, player = state.current) {
+  return restrictionsFor(state, player).some((r) => r.forbidSkills === true);
+}
+
+/** 某玩家当前的全部合法着法（含普通着法与主动技）。 */
+function playerActions(state, player = state.current) {
+  if (state.pendingChoice) {
+    const choice = state.pendingChoice;
+    if (choice.player !== player) return [{ player, type: 'pass', card: null, reason: '等待对方选牌' }];
+    // 候选来自"持牌者"的手牌（观星是自己、汇流是发动者）。
+    // candidateIds 可以进一步把候选限定成"其中一部分"（汇流：只能交刚抽到的牌）。
+    const hand = state.hands[choice.player] ?? [];
+    const allowed = choice.candidateIds
+      ? hand.filter((c) => choice.candidateIds.includes(c.id))
+      : hand;
+    const picked = new Set(choice.picked ?? []);
+    const need = (choice.count ?? 1) - picked.size;
+    const actions = [];
+
+    if (need > 1) {
+      // 需要选多张：逐张选，选满后再确认
+      for (const card of allowed) {
+        if (picked.has(card.id)) continue;
+        actions.push({ player, type: 'chooseCard', card, cardId: card.id, pending: true });
+      }
+      if (picked.size === (choice.count ?? 1)) {
+        actions.push({ player, type: 'confirmChoice', card: null, cardIds: [...picked] });
+      }
+      return actions;
+    }
+
+    // 只差一张（或本来就只需一张）：直接选完即生效
+    for (const card of allowed) {
+      if (picked.has(card.id)) continue;
+      actions.push({ player, type: 'chooseCard', card, cardId: card.id });
+    }
+    return actions;
+  }
+
+  const context = skillContextOf(state);
+  const kinds = legalKindsFor(state, player);
+  const actions = legalActions(state, player).filter((action) => {
+    if (action.type === 'pass') return true;
+    // 技能对"可放牌型"的额外限制（例如威严）
+    return !kinds || kinds.includes(action.card.kind);
+  });
+
+  if (state.result.over || player !== state.current) return actions;
+
+  // 沉默这类限制会禁用主动技能：整段"主动技着法"都不生成
+  if (skillsForbidden(state, player)) return actions;
+
+  for (const entry of context.entries) {
+    if (entry.player !== player) continue;
+    const skill = entry.skill;
+    const used = state.usesById[skill.id] ?? 0;
+    if (skill.type !== 'active' || used >= skill.maxUses) continue;
+    const hook = skill.hooks.extraActions;
+    if (!hook) continue;
+    for (const action of hook(context, state, player) ?? []) {
+      let expanded = [action];
+      if (action.needsCard) {
+        // 需要指定一张手牌：为每张手牌生成一个着法
+        expanded = state.hands[player].map((card, handIndex) => ({
+          ...action,
+          handIndex,
+          card,
+          label: `${action.label}（${cardNameSafe(card)}）`,
+        }));
+      }
+      actions.push(...expanded.map((a) => ({ ...a, skill: skill.id, usesLeft: skill.maxUses - used })));
+    }
+  }
+  return actions;
+}
+
+/** 卡面名称（避免 game.js 直接依赖 UI 文案，这里用简短形式）。 */
+function cardNameSafe(card) {
+  if (!card) return '?';
+  if (isDigit(card)) {
+    if (card.color === 'purple') return '紫0';
+    if (card.color === 'black') return '黑5';
+    return String(card.rank);
+  }
+  return `${card.color === 'dark' ? '深' : '浅'}${isBomb(card) ? 'E' : 'M'}`;
+}
+
+/** 是否存在除过牌以外的合法着法。 */
+function canAct(state, player = state.current) {
+  return playerActions(state, player).some((a) => a.type !== 'pass');
+}
+
+/** 技能提供的抽牌方案（过牌时）。 */
+function drawPlanFor(state, player) {
+  for (const entry of skillContextOf(state).entries) {
+    if (entry.player !== player) continue;
+    const hook = entry.skill.hooks.drawOnPass;
+    if (!hook) continue;
+    const plan = hook(skillContextOf(state), state, player);
+    if (plan) return plan;
+  }
+  return null;
+}
+
+/** 挂起一个交互式选牌请求。 */
+function setPendingChoice(state, request) {
+  state.pendingChoice = { ready: false, ...request };
+}
+
+/** 从手牌里取走一张（按 id）。 */
+function takeFromHand(state, player, cardId) {
+  const hand = state.hands[player];
+  const index = hand.findIndex((c) => c.id === cardId);
+  if (index < 0) return null;
+  return hand.splice(index, 1)[0];
+}
+
+/** 技能可用的引擎接口（以参数形式传给钩子，避免技能反向依赖 game.js）。 */
+const SKILL_API = {
+  drawCards,
+  setPendingChoice,
+  takeFromHand,
+  other,
+};
+
+/** 选技完成或直接指定技能后，执行 onGameStart 钩子。 */
+function runGameStartHooks(state, rng) {
+  for (const entry of skillContextOf(state).entries) {
+    const hook = entry.skill.hooks.onGameStart;
+    // rng 传给钩子：观星要"随机"拿对方 3 张牌，必须可复现
+    if (hook) hook(skillContextOf(state), state, entry.player, SKILL_API, rng);
+  }
+}
+
+/** 选择技能（选技阶段）。picks 按"选择顺序"记录，元素是玩家号。 */
+function chooseSkill(state, player, skillId) {
+  if (!state.draft) throw new Error('当前不在选技阶段');
+  if (state.result.over) throw new Error('对局已结束');
+  const order = state.draft.order;
+  const pickedCount = state.draft.picks.length;
+  const nextPicker = order[pickedCount];
+  if (player !== nextPicker) throw new Error(`还没轮到玩家 ${player} 选技能`);
+  if (!state.draft.options.includes(skillId)) throw new Error('该技能不在候选里');
+  // 已经被选走的技能不能重复选——否则"后手先选"就没有意义了
+  if (!state.draft.available.includes(skillId)) throw new Error('该技能已被对方选走');
+  if (state.skills[player]) throw new Error('该玩家已经选过技能');
+
+  const next = clone(state);
+  next.draft.picks.push(player);
+  next.skills[player] = skillId;
+  next.draft.available = next.draft.available.filter((id) => id !== skillId);
+
+  if (next.draft.picks.length >= order.length) {
+    next.draft = null;
+    next.current = next.firstPlayer;
+    runGameStartHooks(next, createRng(next.turn * 7919 + 13));
+    // 开局钩子可能挂起交互式选牌（观星）：此时把行动权交给需要选牌的人
+    if (next.pendingChoice) next.current = next.pendingChoice.player;
+  } else {
+    next.current = order[next.draft.picks.length];
+  }
+  return next;
+}
+
+/** 当前该由谁做决定（选技 / 选牌），没有则返回 null。 */
+function waitingFor(state) {
+  if (state.result.over) return null;
+  if (state.draft) return state.draft.order[state.draft.picks.length] ?? null;
+  if (state.pendingChoice && !state.pendingChoice.ready) return state.pendingChoice.player;
+  return null;
+}
+
+/** 牌堆抽空后，需要连续过牌几次才结算（双方各两次 = 每人多等一个回合）。 */
+const SETTLE_PASSES = 4;
+
+/** 跳过行动或过牌之后的收尾：结算判断 + 换手。 */
+function finishTurn(state, actionType) {
+  // 结算条件：牌堆已空 且 双方各连续过了两次牌（跳过行动也计入，避免僵局）。
+  // 原来是"各过 1 次"，等于无路可走时立刻收场；现在多给一个回合的缓冲，
+  // 让双方还有机会靠技能/最后的牌改变结果。
+  if (actionType === 'pass' || actionType === 'skip') {
+    if (state.consecutivePasses >= SETTLE_PASSES && state.deck.length === 0) {
+      settle(state);
+      return;
+    }
+  }
+  if (state.turn > state.turnLimit) {
+    settle(state, '达到回合上限，按手牌数结算');
+    return;
+  }
+  // 下回合限制只作用于"对方紧接的那一个回合"。
+  // 按玩家分槽存储 + ready 标记：
+  //   - 刚挂上、还没轮到他的限制（ready=false）留到他的回合才生效；
+  //   - 他这个回合结束了，才把已生效的那批清掉。
+  // 这样在自己回合内挂给对手的限制不会被自己清掉，也不会覆盖对手已有的限制。
+  consumeRestrictions(state, state.current);
+  state.current = other(state.current);
+  markRestrictionsReady(state, state.current);
+}
+
+function settle(state, reason = '牌堆已空，双方连续过牌两轮') {
+  const a = state.hands[0].length;
+  const b = state.hands[1].length;
+  if (a === b) state.result = { over: true, winner: null, reason: `${reason}：手牌相同，平局` };
+  else state.result = { over: true, winner: a < b ? 0 : 1, reason: `${reason}：手牌 ${a} : ${b}` };
+}
+
+/**
+ * 执行一个着法。
+ * @returns {GameState} 新状态（永不修改入参）
+ */
+function applyAction(state, action) {
+  if (state.result.over) throw new Error('对局已结束');
+  if (!action || !['place', 'pass', 'skill', 'chooseCard', 'confirmChoice'].includes(action.type)) {
+    throw new Error('未知着法');
+  }
+
+  // 选技阶段与交互式选牌期间，只接受对应的着法
+  if (state.draft) throw new Error('当前在选技阶段，请先选择技能');
+  if (state.pendingChoice) {
+    if (action.type !== 'chooseCard' && action.type !== 'confirmChoice') throw new Error('当前需要先完成选牌');
+    return applyChoiceStep(state, action);
+  }
+  // 校验"该谁走"时以着法自带的 player 为准，而不是 state.current。
+  // 原因：AI 搜索会按层交替推演双方，用 toMove 生成着法但不改 state.current——
+  // 这是合法的内部用法，不该被当成"抢回合"。传错玩家时仍会被下面的合法性校验拦下。
+  if (action.player !== 0 && action.player !== 1) throw new Error(`非法玩家：${action.player}`);
+
+  const next = clone(state);
+  next.turn = state.turn + 1;
+  const log = { type: action.type, player: action.player, col: action.col ?? null, card: action.card ?? null };
+  next.lastAction = log;
+
+  if (action.type === 'pass') return applyPass(next, action, log);
+
+  // 合法性统一用"原状态"校验，避免克隆体带来的差异
+  verifyLegal(state, action);
+
+  if (action.type === 'skill') return applySkill(next, state, action, log);
+
+  // ---- 放置卡牌 ----
+  const hand = next.hands[action.player];
+  const card = hand[action.handIndex];
+  verifyHandIds(hand);
+
+  hand.splice(action.handIndex, 1);
+  next.consecutivePasses = 0;
+  next.history.push([action.player, 'place']);
+
+  const stack = next.bases[action.col];
+  if (isBomb(card)) {
+    // 炸掉顶端数字；基底（该列最下面那张）本身不可被炸。
+    const canDestroy = stack.length > 1;
+    const destroyed = canDestroy ? stack.pop() : null;
+    next.outOfPlay.push(card);
+    if (destroyed) next.outOfPlay.push(destroyed);
+    // 放过 E 也算"放过 E/M"——威严的保护条件用 emPlaced 判定，必须两边都记
+    next.emPlaced[action.player] += 1;
+    log.destroyed = destroyed ? [destroyed] : [];
+  } else if (isMagic(card)) {
+    next.outOfPlay.push(card);
+    next.emPlaced[action.player] += 1;
+    // M 产生的就是一条"下回合限制"，与禁锢/荆棘走同一套机制。
+    next.restriction = addRestriction(next, 1 - action.player, restrictionFromMagic(action.player, action.col, card));
+    log.magic = next.restriction;
+  } else {
+    // 数字牌落桌同样算"放过牌"——爆弹的被动效果挂在这里
+    stack.push(card);
+    next.lastDigit[action.player] = { turn: next.turn, cardId: card.id };
+  }
+
+  // 技能：牌落桌之后触发（荆棘在这里挂上限制）
+  for (const entry of skillContextOf(next).entries) {
+    const hook = entry.skill.hooks.onPlaced;
+    if (hook) hook(skillContextOf(next), next, action, SKILL_API);
+  }
+
+  if (hand.length === 0) {
+    next.result = { over: true, winner: action.player, reason: '出完手牌' };
+    return next;
+  }
+
+  finishTurn(next, 'place');
+  return next;
+}
+
+function applyPass(next, action, log) {
+  next.history.push([action.player, 'pass']);
+  next.consecutivePasses += 1;
+
+  // 抽牌方案：默认自己 2 张、对方 1 张；技能可以改写（汇流）。
+  const plan = drawPlanFor(next, action.player);
+  const selfDraw = plan ? plan.self : 2;
+  const opponentDraw = plan ? plan.opponent : 1;
+  const needed = selfDraw + opponentDraw;
+  if (next.deck.length >= (plan ? 1 : 3)) {
+    log.drawn = {
+      [action.player]: drawCards(next, action.player, selfDraw),
+      [other(action.player)]: drawCards(next, other(action.player), opponentDraw),
+    };
+    if (next.deck.length < needed) log.drawnShort = true;
+  } else {
+    log.drawn = null;
+  }
+
+  // 技能：过牌抽完之后（汇流在这里挂起"交一张给对手"）
+  for (const entry of skillContextOf(next).entries) {
+    if (entry.player !== action.player) continue;
+    const hook = entry.skill.hooks.afterPassDraw;
+    if (hook) hook(skillContextOf(next), next, action.player, SKILL_API, plan);
+  }
+  if (next.pendingChoice) {
+    log.turnPending = true;
+    return next;
+  }
+
+  finishTurn(next, 'pass');
+  return next;
+}
+
+function applySkill(next, prev, action, log) {
+  const skill = getSkill(action.skill);
+  if (!skill) throw new Error(`未知技能：${action.skill}`);
+  if (next.skills[action.player] !== action.skill) throw new Error('你没有这个技能');
+  const used = next.usesById[action.skill] ?? 0;
+  if (skill.type !== 'active' || used >= skill.maxUses) throw new Error(`技能 ${action.skill} 已用完`);
+
+  // 需要指定手牌的技能（甩手）：先把那张牌从手牌里取出来交给钩子
+  let carried = null;
+  if (action.handIndex !== undefined && action.handIndex !== null) {
+    carried = takeFromHand(next, action.player, action.card?.id);
+    if (!carried) throw new Error('指定的手牌不存在');
+    action = { ...action, card: carried };
+  }
+
+  const handled = skill.hooks.applyAction?.(skillContextOf(next), next, action, log, SKILL_API);
+  if (handled === false) throw new Error(`技能 ${action.skill} 执行失败`);
+
+  next.usesById[action.skill] = used + 1;
+  next.skillUses[action.player] = (next.skillUses[action.player] ?? 0) + 1;
+  next.history.push([action.player, 'skill']);
+
+  // 手牌清空即胜——不管牌是怎么离开手的。
+  // 甩手把最后一张手牌丢进已出局区时，效果与"出完手牌"完全一致：
+  // 立刻结束对局、弃牌者获胜（否则会出现手牌为 0 却不结束的死局）。
+  if (next.hands[action.player].length === 0) {
+    next.result = { over: true, winner: action.player, reason: '出完手牌' };
+    return next;
+  }
+
+  // 不占用行动的技能（消却）：回合数回退，保持"还是这个回合"
+  if (log.turnEnds === false) {
+    next.turn = prev.turn;
+    return next;
+  }
+  if (next.pendingChoice) return next;
+  finishTurn(next, action.skill === 'shuimian' ? 'skip' : 'place');
+  return next;
+}
+
+/**
+ * 交互式选牌的一步。
+ * - chooseCard：记录一张；若已经选够 count 张，就地生效。
+ * - confirmChoice：把已选的若干张一次性生效（用于"一次选 3 张"的技能）。
+ */
+function applyChoiceStep(state, action) {
+  const choice = state.pendingChoice;
+  if (!choice) throw new Error('当前没有待完成的选牌');
+  if (action.player !== choice.player) throw new Error(`该由玩家 ${choice.player} 选牌`);
+
+  const hand = state.hands[choice.player] ?? [];
+  const picked = [...(choice.picked ?? [])];
+
+  if (action.type === 'chooseCard') {
+    if (!hand.some((c) => c.id === action.cardId)) throw new Error('所选牌不在手牌里');
+    // candidateIds 把候选限定成一部分时（汇流：只能交刚抽到的牌），这里必须同样校验
+    if (choice.candidateIds && !choice.candidateIds.includes(action.cardId)) {
+      throw new Error('这张牌不在本次可选范围里');
+    }
+    if (picked.includes(action.cardId)) throw new Error('这张牌已经选过了');
+    picked.push(action.cardId);
+  } else {
+    if (picked.length === 0) throw new Error('还没有选任何牌');
+  }
+
+  const need = choice.count ?? 1;
+  const shouldApply = action.type === 'confirmChoice' || picked.length >= need;
+
+  const next = clone(state);
+  next.turn = state.turn + 1;
+
+  if (!shouldApply) {
+    // 还没选够：只更新进度，回合不结束
+    next.pendingChoice = { ...choice, picked };
+    next.turn = state.turn;
+    next.lastAction = { type: 'chooseCard', player: choice.player, card: action.card ?? null };
+    return next;
+  }
+
+  if (picked.length !== need) throw new Error(`需要选 ${need} 张，实际选了 ${picked.length} 张`);
+
+  const skill = getSkill(next.skills[choice.player]);
+  const request = { ...choice, cardIds: picked, picked, ready: true };
+  const handled = skill?.hooks.applyChoice?.(skillContextOf(next), next, request, SKILL_API);
+  if (handled === false) throw new Error('选牌结果无法应用');
+
+  next.pendingChoice = null;
+  next.lastAction = { type: 'chooseCard', player: choice.player, card: action.card ?? null };
+
+  // 开局阶段的选牌（观星在游戏开始时触发）**不是一个回合**：
+  // 它必须原样交还给先手，既不能吃掉先手的第一手，也不能推进 turn
+  // ——否则禁列判定（要求 turn === 1）会失效。
+  if (choice.phase === 'opening') {
+    next.turn = state.turn;
+    next.current = state.firstPlayer;
+    return next;
+  }
+
+  // 回合内的选牌（汇流交牌）属于发动者那一回合的一部分：先回到发动者，再正常结束回合换手。
+  next.current = choice.player;
+  finishTurn(next, 'place');
+  return next;
+}
+
+/** 校验着法是否在当前合法着法集合里（用原状态校验）。 */
+function verifyLegal(state, action) {
+  const legal = playerActions(state, action.player);
+  const found = legal.some((a) => {
+    if (a.type !== action.type) return false;
+    if (action.type === 'place') return a.col === action.col && a.handIndex === action.handIndex;
+    if (action.type === 'skill') {
+      if (a.skill !== action.skill) return false;
+      if (a.col !== action.col) return false;
+      if (a.handIndex !== undefined) return a.handIndex === action.handIndex;
+      return true;
+    }
+    if (action.type === 'chooseCard') return a.cardId === action.cardId;
+    if (action.type === 'confirmChoice') return true;
+    return true;
+  });
+  if (!found) throw new Error('非法着法');
+}
+
+function verifyHandIds(hand) {
+  const ids = new Set();
+  for (const card of hand) {
+    if (ids.has(card.id)) throw new Error(`手牌出现重复 id：${card.id}`);
+    ids.add(card.id);
+  }
+}
+
+/** 对局是否结束。 */
+const isOver = (state) => state.result.over;
+
+/** 从某玩家视角的胜负（1 胜 / 0 平 / -1 负；未结束返回 null）。 */
+function outcomeFor(state, player) {
+  if (!state.result.over) return null;
+  if (state.result.winner === null) return 0;
+  return state.result.winner === player ? 1 : -1;
+}
+
+/**
+ * 牌数守恒校验：牌堆 + 基底 + 双方手牌 + 已出局 = 37。
+ *
+ * 「创生」会凭空造牌，所以 expected 会把造出来的张数一起算上：
+ * 这样"牌数守恒"这条不变量依然成立，同时又能抓出真正丢牌/多牌的 bug。
+ */
+function cardCounts(state) {
+  const inPlay = state.bases.reduce((sum, stack) => sum + stack.length, 0);
+  const hands = state.hands[0].length + state.hands[1].length;
+  const created = state.createdCards?.length ?? 0;
+  const total = state.deck.length + inPlay + hands + state.outOfPlay.length;
+  return {
+    deck: state.deck.length,
+    board: inPlay,
+    hands,
+    outOfPlay: state.outOfPlay.length,
+    created,
+    total,
+    expected: DECK_SIZE + created,
+  };
+}
+
+/** 取"当前行动方身上生效的下回合限制"（第一条；供只关心单条限制的调用方）。 */
+function activeRestriction(state) {
+  return firstRestriction(state, state.current) ?? null;
+}
+
+/** 取"某个玩家身上生效的全部下回合限制"（可能有 0 条、1 条或多条）。 */
+function activeRestrictions(state, player = state.current) {
+  return restrictionsFor(state, player);
+}
+
+/** 把状态整理成一行摘要，便于 CLI 与日志。 */
+function summarize(state) {
+  const label = (c) => {
+    if (isDigit(c)) {
+      if (c.color === 'purple') return '紫0';
+      if (c.color === 'black') return '黑5';
+      return String(c.rank);
+    }
+    return `${c.color === 'dark' ? '深' : '浅'}${isBomb(c) ? 'E' : 'M'}`;
+  };
+  const board = state.bases.map((stack) => stack.map(label).join('>'));
+  const restriction = activeRestriction(state);
+  const restrictionLabel = restriction ? ` ${restriction.label ?? restriction.kind}限制` : '';
+  const skills = state.skills?.some(Boolean) ? ` 技能[${state.skills.map((id) => (id ? getSkill(id)?.name ?? id : '—')).join('/')}]` : '';
+  return `T${state.turn} 玩家${state.current + 1} 列[${board.join(' | ')}] 手牌 ${state.hands[0].length}:${state.hands[1].length} 堆 ${state.deck.length}${hasPurpleLock(state) ? ' 紫0限锁' : ''}${restrictionLabel}${skills}`;
+}
+
+// ─── src/ai/heuristics.js ────────────────────────────────────────
+/**
+ * 局面评估启发式。
+ *
+ * AI 的每一档难度都共用这里的评估函数，区别只在于"看得多远"：
+ *   简单 = 只收集合法着法后随机选
+ *   普通 = 评估当前选择 + 一步对手最佳回应
+ *   困难 = 在采样出的对手手牌上做定深搜索
+ * 因此想调 AI 强度，改这里的权重即可影响全部难度。
+ */
+
+
+
+
+/** 权重集中在这里，方便用模拟器调参。 */
+const WEIGHTS = Object.freeze({
+  handDiff: 10,
+  mobility: 2.0, // 牌桌可接数字的种类数
+  playable: 2.6, // 手牌里现在就能打出去的张数
+  control: 1.6,
+  tempo: 2.5,
+  endgame: 6,
+  pressure: 24,
+  bombBase: 6,
+  bombPerRank: 1.5,
+  bombOnFive: 3, // 黑 5 免疫炸弹，炸它没意义（引擎本来也不给这个着法）
+  bombOnBase: -4,
+  magicBase: 2.5,
+  magicPerOption: 0.7,
+  digitBase: 1,
+  digitExactHalf: 0.6,
+  digitOnFive: 2.5,
+  digitToZero: 2,
+  purple: 12,
+  purpleLocked: 4,
+  revealBase: 5,
+  blackFiveSafe: 0.8, // 黑 5 免疫炸弹 + 只接 0，是很安全的窄口顶牌
+});
+
+/** 形成"控制"的顶端牌：对手可接的数字越少越强。 */
+function controlValue(card) {
+  if (!card || !isDigit(card)) return 0;
+  if (isPurpleZero(card)) return 12;
+  if (isBlackFive(card)) return 5;
+  const options = allowedRanksOn(card).length;
+  return options === 1 ? 6 : 1.5;
+}
+
+/** 牌桌上可接数字的总种类数（列越"宽"越自由）。 */
+function columnMobility(state) {
+  let total = 0;
+  for (let col = 0; col < state.bases.length; col++) {
+    const top = topOf(state, col);
+    if (top) total += allowedRanksOn(top).length;
+  }
+  return total;
+}
+
+/** 玩家 p 手牌里"现在就能打出去"的张数（真实的行动自由）。 */
+function playableCount(state, p) {
+  if (!state.hands[p]) return 0;
+  let count = 0;
+  for (const card of state.hands[p]) {
+    for (let col = 0; col < state.bases.length; col++) {
+      if (canPlaceAt(state, p, col, card).ok) {
+        count += 1;
+        break;
+      }
+    }
+  }
+  return count;
+}
+
+/** 综合行动自由：牌桌宽度 + 自己能出的牌数。 */
+function mobility(state, p) {
+  return columnMobility(state) + playableCount(state, p);
+}
+
+/**
+ * 从 p 视角评估局面（正数对 p 有利）。不含终局判断。
+ * @param {object} state
+ * @param {number} p
+ * @param {object} [w] 权重覆盖，便于模拟器调参
+ */
+function evaluate(state, p, w = WEIGHTS) {
+  const opp = other(p);
+  let score = 0;
+
+  // 1) 手牌差：自己手牌越少越好。
+  score += w.handDiff * (state.hands[opp].length - state.hands[p].length);
+
+  // 2) 行动自由：牌桌可接的数字种类（对双方等价，作为整体宽度）+ 自己现在就能出的牌数。
+  score += w.mobility * (columnMobility(state) - 4);
+  score += w.playable * (playableCount(state, p) - playableCount(state, opp));
+
+  // 3) 顶端控制：让对手可选数字变少的顶端更强。
+  for (let col = 0; col < state.bases.length; col++) {
+    const top = topOf(state, col);
+    if (top) score += w.control * controlValue(top);
+  }
+
+  // 4) 节奏：谁在推进局面，谁就掌握主动。
+  const recent = state.history.slice(-6);
+  if (recent.length > 0) {
+    const mine = recent.filter((e) => e[0] === p && e[1] === 'place').length;
+    const theirs = recent.filter((e) => e[0] === opp && e[1] === 'place').length;
+    score += WEIGHTS.tempo * (mine - theirs);
+  }
+
+  // 5) 终局阶段：牌堆见底时，手牌数直接决定胜负。
+  if (state.deck.length === 0) {
+    score += WEIGHTS.endgame * (state.hands[opp].length - state.hands[p].length);
+  }
+
+  // 6) 临门一脚：对手快要出完时，必须优先压制。
+  if (state.hands[opp].length <= 2) score -= WEIGHTS.pressure * (3 - state.hands[opp].length);
+  if (state.hands[p].length <= 2) score += WEIGHTS.pressure * (3 - state.hands[p].length);
+
+  return score;
+}
+
+/**
+ * 技能着法的价值评估。
+ * 这里只做"粗评"，作用是让排序不至于把技能排到过牌之后；
+ * 真正的取舍由搜索在后续层里体现。
+ */
+function skillScore(state, action, p) {
+  const opp = other(p);
+  // 限制是"每人一槽、可叠加"的：沉默（禁 E/M）和荆棘（禁压某张牌）可以和别的限制共存，
+  // 但"把牌锁到某一列"这一类是互斥的——禁锢 / 爆弹 / 深 M 都写 allowedColumns，
+  // 再补一条只会把前一条顶掉，纯亏一次技能次数。所以只对这一类做抑制。
+  const COLUMN_LOCKS = ['magic-dark', 'magic-light', 'baodan-lock', 'skill-jinggu'];
+  const oppRestrictions = restrictionsFor(state, opp);
+  const hasColumnLock = oppRestrictions.some((r) => COLUMN_LOCKS.includes(r.kind));
+  if (hasColumnLock && action.skill === 'jinggu') return -50;
+
+  // 沉默现在同时禁 E/M 和主动技能：两者都打不到才不值得用
+  if (action.skill === 'chenmo') {
+    const hasEM = state.hands[opp].some((c) => c.kind !== 'number');
+    // 对手还有没用完的主动技吗（沉默也会把它一起封掉）
+    const oppHasActive = skillContextOf(state).entries.some((e) => {
+      if (e.player !== opp) return false;
+      if (e.skill.type !== 'active') return false;
+      return (state.usesById[e.skill.id] ?? 0) < e.skill.maxUses;
+    });
+    if (!hasEM && !oppHasActive) return -20;
+  }
+
+  switch (action.skill) {
+    case 'xiaoque': {
+      // 移除顶端：如果移除后对手的行动自由明显变小，就更值得
+      const before = mobility(state, opp);
+      const top = topOf(state, action.col);
+      const freed = top ? allowedRanksOn(top).length : 0;
+      return 3 + freed * 1.2 + (before > 0 ? 0.5 : 0);
+    }
+    case 'jinggu':
+      // 与深 M 完全同一个效果，因此共用同一个"封锁着法数"算法与同一套权重
+      return 5.5 + lockedOutCount(state, opp, action.col) * WEIGHTS.magicPerOption;
+    case 'shuimian': {
+      // 跳过对手一次行动 ≈ 白赚一个回合；牌堆空时几乎没有意义
+      if (state.deck.length === 0) return 0.5;
+      const oppE = state.hands[opp].filter((c) => c.kind !== 'number').length;
+      return 5 + oppE * 0.5;
+    }
+    case 'shuaishou': {
+      // 丢一张手牌：手牌越多越值（更快出完）。
+      // 手里只剩最后一张时这一手直接获胜，必须给一个压倒性的分数。
+      if (state.hands[p].length <= 1) return 60;
+      return 2 + Math.min(3, state.hands[p].length * 0.4);
+    }
+    case 'kanpo':
+      // 不占行动，纯信息收益：排在"随便出牌"之后，但明显优于过牌。
+      return 4;
+    case 'chenmo': {
+      // 沉默：封掉对手下回合的 E/M。对手手里的 E/M 越多越值；
+      // 对手手牌越少、"少一张牌可出"的伤害越大。
+      const oppEM = state.hands[opp].filter((c) => c.kind !== 'number').length;
+      const pressure = state.hands[opp].length <= 3 ? 1.5 : 0;
+      return 4.5 + oppEM * 1.5 + pressure;
+    }
+    case 'chuangsheng': {
+      // 创生：塞给对方一张牌。与汇流共用同一套判断——
+      // 数这张牌在对方手里有几个落点，落点越少越卡手（0 落点 = 完全打不出去）。
+      const rank = action.rank ?? 0;
+      const spots = countLandingSpots(state, rank);
+      const dead = Math.max(0, 3 - spots); // 0 个落点 = 3 分，3 个及以上 = 0 分
+      const pressure = Math.max(0, 3 - state.hands[opp].length) * 1.0;
+      return 2.5 + dead * 1.5 + pressure;
+    }
+    default:
+      return 1.5;
+  }
+}
+
+/**
+ * "把对手锁到 col 这一列（且只能出数字牌）"能封掉对手多少个着法。
+ *
+ * 深 M 与禁锢在引擎里是同一个效果（列限制 + digitsOnly），所以**必须共用这一份算法**，
+ * 否则同一个效果会因为两条不同的评分公式而选出不同的列。
+ * @returns {number} 被封锁的着法数
+ */
+function lockedOutCount(state, player, col) {
+  const options = playerActions(state, player).filter((a) => a.type === 'place');
+  return options.filter((a) => a.col !== col || a.card.kind !== 'number').length;
+}
+
+/** 评估"某张牌放到某列"这一手本身的价值（从 p 视角）。 */
+function scoreMove(state, action, p) {
+  const opp = other(p);
+  let score = 0;
+
+  if (action.type === 'pass') {
+    // 过牌：手牌变多，但换来对手也拿 1 张；牌堆空时可用来拖到结算。
+    if (state.deck.length === 0) {
+      const passScore = WEIGHTS.handDiff * 0.4;
+      return -2 + passScore;
+    }
+    return -6;
+  }
+
+  // 技能与选牌着法没有"牌 + 列"结构，单独给分（避免下面按牌类型判断时崩掉）
+  if (action.type === 'skill') {
+    return skillScore(state, action, p);
+  }
+  if (action.type === 'chooseCard') {
+    // 选牌本身不是收益，给一个很小的正值以便它不会被当成"过牌"那样被压掉
+    return 0.5;
+  }
+  if (action.type === 'confirmChoice') return 0.4;
+
+  const card = action.card;
+  const stack = state.bases[action.col];
+  const top = topOf(state, action.col);
+
+  if (isBomb(card)) {
+    const rank = top?.rank ?? 0;
+    score += WEIGHTS.bombBase + rank * WEIGHTS.bombPerRank;
+    if (top && isBlackFive(top)) score -= WEIGHTS.bombOnFive;
+    if (stack.length === 2) score += WEIGHTS.bombOnBase; // 炸掉后基底直接暴露
+  } else if (isMagic(card)) {
+    // 深 M：锁一列；浅 M：封一列。两者都用"被封掉的着法数"衡量，只是作用范围不同
+    const options = legalActions(state, opp).filter((a) => a.type === 'place');
+    const blocked = isDark(card)
+      ? lockedOutCount(state, opp, action.col)
+      : options.filter((a) => a.col === action.col).length;
+    score += WEIGHTS.magicBase + blocked * WEIGHTS.magicPerOption;
+  } else {
+    score += WEIGHTS.digitBase;
+    if (top) {
+      // 放 5 或 0 能制造"只有一种接法"的窄口。
+      if (card.rank === 5) score += WEIGHTS.digitOnFive;
+      if (card.rank === 0) score += WEIGHTS.digitToZero;
+      const options = allowedRanksOn(card);
+      if (options.length === 1) score += WEIGHTS.digitExactHalf;
+      if (card.rank === top.rank + 1) score += 0.5; // 略微偏好更自然的连牌
+    }
+    if (isPurpleZero(card)) score += WEIGHTS.purple;
+    if (isBlackFive(card)) score += WEIGHTS.blackFiveSafe;
+    // 把基底盖住（列高 1 -> 2）能防止对手直接炸基底。
+    if (stack.length === 1) score += WEIGHTS.revealBase * 0.2;
+  }
+
+  // 全局紫 0 限锁下，出数字牌是唯一选择，额外加分以体现"能出就出"。
+  if (hasPurpleLock(state) && isDigit(card)) score += WEIGHTS.purpleLocked;
+  return score;
+}
+
+/**
+ * 搜索专用的"技能探索加成"。
+ *
+ * 搜索按 beamWidth 只保留前 N 个着法，技能着法的静态分普遍低于出牌，
+ * 结果就是"技能根本没进搜索树"，AI 永远不会考虑它。
+ * 这里只在排序时人为抬高技能着法，让它们至少被评估过——
+ * **最终打分不加这个加成**，所以不会因此高估技能。
+ */
+const SKILL_SEARCH_BIAS = 12;
+
+/** 立刻能赢的着法检查（出完手牌 / 把最后一张手牌弃掉）。 */
+function immediateWin(state, action, p) {
+  if (state.hands[p].length !== 1) return false;
+  if (action.type === 'place') return true;
+  // 甩手丢掉最后一张手牌，引擎里同样判"出完手牌"获胜
+  return action.type === 'skill' && action.skill === 'shuaishou';
+}
+
+/** 给着法排序，供搜索剪枝使用。 */
+function orderActions(state, actions, p) {
+  return actions
+    .map((action) => ({
+      action,
+      score: (immediateWin(state, action, p) ? 1e6 : 0)
+        + scoreMove(state, action, p)
+        + (action.type === 'skill' ? SKILL_SEARCH_BIAS : 0),
+    }))
+    .sort((a, b) => b.score - a.score)
+    .map((entry) => entry.action);
+}
+
+/** 若局面已结束，返回从 p 视角的终局分值。 */
+function terminalScore(state, p) {
+  const outcome = outcomeFor(state, p);
+  if (outcome === null) return null;
+  if (outcome > 0) return 1e9 + state.hands[other(p)].length * 100;
+  if (outcome < 0) return -(1e9 + state.hands[p].length * 100);
+  return 0;
+}
+
+// ─── src/ai/search.js ────────────────────────────────────────────
+/**
+ * 定深搜索（negamax + alpha-beta），支持"信息不完全"下的确定性采样。
+ *
+ * 真实对局里 AI 看不到对手手牌，所以搜索前先把对手手牌按剩余未知牌采样一次
+ * （determinization），在这套假定完整信息上搜索。多次采样取平均即为困难档。
+ *
+ * 视角约定（重要）：search() 返回的是「当前该走的一方」的分数，标准 negamax。
+ * 父节点取负号后即为自己的分数。这样在任意深度的静态评估都不会出现视角错位。
+ */
+
+
+/**
+ * @typedef {object} SearchConfig
+ * @property {number} depth      搜索深度（层数 = 双方各走一步算 2 层）
+ * @property {number} beamWidth  每层最多展开的着法数
+ * @property {number} maxNodes   节点预算上限（防止长考）
+ */
+
+/** @type {SearchConfig} */
+const DEFAULT_SEARCH = Object.freeze({ depth: 4, beamWidth: 12, maxNodes: 2500 });
+
+/**
+ * @param {object} state
+ * @param {number} toMove    当前该谁走（也是返回值视角）
+ * @param {number} depth
+ * @param {number} alpha
+ * @param {number} beta
+ * @param {SearchConfig} config
+ * @param {{nodes: number}} counter
+ */
+function search(state, toMove, depth, alpha, beta, config, counter) {
+  // 终局：从"该走的一方"视角看，若对局已结束，直接给结果分。
+  const terminal = terminalScore(state, toMove);
+  if (terminal !== null) return terminal;
+  // 交互式选牌节点（观星/汇流的中间态）：不继续展开，直接静态评估。
+  // 这类节点的行动方可能不是 toMove，展开会破坏"按层交替"的假设。
+  if (state.pendingChoice || state.draft) return evaluate(state, toMove);
+  if (depth <= 0 || counter.nodes >= config.maxNodes || state.turn > state.turnLimit) {
+    return evaluate(state, toMove);
+  }
+  counter.nodes += 1;
+
+  // 用 playerActions：它包含主动技与技能带来的各类着法
+  const actions = orderActions(state, playerActions(state, toMove), toMove).slice(0, config.beamWidth);
+  if (actions.length === 0) return evaluate(state, toMove);
+
+  let best = -Infinity;
+  for (const action of actions) {
+    const next = applyAction(state, action);
+    const value = -search(next, 1 - toMove, depth - 1, -beta, -alpha, config, counter);
+    if (value > best) best = value;
+    if (best > alpha) alpha = best;
+    if (alpha >= beta) break;
+  }
+  return best;
+}
+
+/**
+ * 在一个（采样后的）完整信息局面上挑最佳着法。
+ * @returns {{action: object, score: number, nodes: number}} score 从 player 视角
+ */
+function bestMoveInWorld(state, player, config = DEFAULT_SEARCH) {
+  // 处于选牌中间态时不做搜索：交给专门的选牌策略
+  if (state.pendingChoice || state.draft) {
+    const actions = playerActions(state, player);
+    return { action: actions[0] ?? null, score: evaluate(state, player), nodes: 0 };
+  }
+  const actions = orderActions(state, playerActions(state, player), player);
+  const counter = { nodes: 0 };
+  let best = actions[0];
+  let bestScore = -Infinity;
+
+  for (const action of actions) {
+    const next = applyAction(state, action);
+    // 走完这一手后轮到对手，对手视角的分数取负即为自己的分数。
+    const opponentView = search(next, 1 - player, Math.max(0, config.depth - 1), -Infinity, Infinity, config, counter);
+    const score = -opponentView;
+    if (score > bestScore) {
+      bestScore = score;
+      best = action;
+    }
+  }
+  return { action: best, score: bestScore, nodes: counter.nodes };
+}
+
+// ─── src/ai/profiles.js ──────────────────────────────────────────
+/**
+ * AI 难度档位。
+ *
+ * 三档共用同一套引擎与启发式，差别只在"算得多深"：
+ *   easy   随机出牌（会犯明显错误，适合先熟悉规则）
+ *   normal 在真实局面上搜索 2 层（能算出对手的最佳回应）
+ *   hard   在真实局面上搜索 3 层（能看到"我出 → 对手回敬 → 我再回敬"）
+ *
+ * 实测（tools/ai-lab3.mjs，每对 60 局、交替先后手）：
+ *   d2 对随机 65% ｜ d3 对随机 73% ｜ d4 对随机 77%
+ *   d3 对 d2 63.3% ｜ d4 对 d2 63.3%（d3 → d4 收益已趋平）
+ * 因此 hard 取 d3：强度提升明显，单步耗时仍在 ~40ms 量级。
+ *
+ * 为什么困难档不"猜对手手牌"：tools/ai-lab.mjs 实测表明，把对手手牌换成
+ * 未知牌池里的牌（哪怕只换一部分）会让胜率从 ~60% 掉到 ~38%——
+ * 这个游戏对"某张关键牌是否在对手手里"极其敏感，错误的建模比不建模更糟。
+ * 所以三档都只用公开信息 + 真实手牌，强度靠搜索深度拉开。
+ *
+ * 想加新档位用 createProfile，不必修改本文件的现役配置。
+ */
+
+
+
+
+
+
+
+
+/** 简单档：完全随机，只在小概率下主动过牌。 */
+function randomPick(state, player, rng) {
+  const actions = playerActions(state, player);
+  const placements = actions.filter((a) => a.type === 'place' || a.type === 'skill');
+  if (placements.length === 0) return actions.find((a) => a.type === 'pass') ?? actions[0];
+  if (rng.next() < 0.05) return actions.find((a) => a.type === 'pass') ?? placements[0];
+  return placements[rng.int(placements.length)];
+}
+
+/** 普通/困难档：在真实局面上做定深搜索。 */
+function treePick(state, player, rng, config) {
+  const { action } = bestMoveInWorld(state, player, {
+    depth: config.depth,
+    beamWidth: config.beamWidth,
+    maxNodes: config.maxNodes,
+  });
+  if (action) return action;
+  return orderActions(state, playerActions(state, player), player)[0];
+}
+
+/**
+ * 只在"有牌可放却想空过"时兜底：避免 AI 用无意义的过牌拖时间。
+ * 牌堆已空时过牌是合法的拖时间手段（能逼出比手牌的结算），保留不干预。
+ * 技能可以对过牌做出修正（例如汇流），这时候也不干预——否则会把技能收益丢掉。
+ */
+function guardWastefulPass(state, player, action) {
+  if (!action || action.type !== 'pass') return action;
+  if (state.deck.length === 0) return action;
+  const modifier = passModifierFor(state, player);
+  if (modifier) return action;
+  const placements = playerActions(state, player).filter((a) => a.type === 'place');
+  if (placements.length === 0) return action;
+  return orderActions(state, placements, player)[0];
+}
+
+/**
+ * 主动技的使用判断。
+ * 目前用保守策略：只有当"这一手不是唯一出路"时才会考虑技能，
+ * 避免简单/普通档因为用技能而放弃必要的出牌。
+ */
+function shouldUseSkill(state, player, action) {
+  if (!action || action.type !== 'skill') return true;
+  const placements = playerActions(state, player).filter((a) => a.type === 'place');
+  // 手牌马上出完时优先出牌（能直接赢）
+  if (state.hands[player].length === 1 && placements.length > 0) return false;
+  // 看破不占行动，而且看得越早越有用（能提前规划），所以有就先用
+  if (action.skill === 'kanpo') return true;
+  return true;
+}
+
+/** 该玩家的过牌是否被技能改写（汇流）。改写过就不要用"出牌"去替换过牌。 */
+function passModifierFor(state, player) {
+  for (const entry of skillContextOf(state).entries) {
+    if (entry.player !== player) continue;
+    const hook = entry.skill.hooks.drawOnPass;
+    if (hook && hook(skillContextOf(state), state, player)) return true;
+  }
+  return false;
+}
+
+/**
+ * 技能强度表：用配对 A/B 实测得到的净胜率（技能对白板），单位是百分点。
+ *
+ * 来源：`技能强度报告-重测.md`（12 技能各 500 局，配对标准误 ±2.2pp，
+ * 12 个里 10 个统计显著、8 个过 Bonferroni）。这张表只影响**选技优先级**，
+ * 不参与对局内的着法评估。
+ *
+ * 关于「沉默」：它是**对技能持有者的特攻**（禁对方 E/M + 禁对方主动技），
+ * 而本表用的是"技能对白板"口径（对手不带任何技能）——那个口径里沉默没有打击目标，
+ * 测出来只会是 ≈0，没有意义。所以沉默的分数按"它克制的技能越多越值"给一个固定值，
+ * 不参与重测。
+ */
+const SKILL_STRENGTH = Object.freeze({
+  jingji: 25, // 荆棘  +25.3
+  guanxing: 19, // 观星  +19.1（重测：3 张改 2 张后从 +23.5 小幅回落）
+  huiliu: 17, // 汇流  +17.4（重测：改成"只能交刚抽到的 3 张里那张"后，从 +32.1 大幅回落）
+  chuangsheng: 16, // 创生  +16.4
+  shuaishou: 13, // 甩手  +13.2
+  weiyan: 8, // 威严   +8.4
+  xiaoque: 8, // 消却   +7.9
+  shuimian: 8, // 睡眠   +7.8
+  jinggu: 6, // 禁锢   +5.8（重测：与深 M 统一选列算法后基本不变）
+  // 沉默：特攻型（禁对方 E/M + 禁对方主动技），"对白板"口径测不出它的价值，
+  // 这里给一个固定估值，不参与重测。
+  chenmo: 5,
+  baodan: 5, // 爆弹   +4.6（重测：取消全部豁免后略升，但仍不显著）
+  kanpo: -1, // 看破   −1.1（不显著，对 AI 无价值）
+});
+
+/** 取技能强度分（未知技能给一个保守的中间值）。 */
+function skillStrength(id) {
+  return SKILL_STRENGTH[id] ?? 6;
+}
+
+/**
+ * AI 在选技阶段挑一个候选。
+ *
+ * 策略：按实测强度做 softmax。强度高的技能大概率被选走，
+ * 但保留噪声——`sharpness` 越小越随机（简单档容易被"看着还行"的技能骗走），
+ * 越大越接近"永远选最强"（困难档）。
+ *
+ * @param {object} state
+ * @param {object} [rng] 随机源；不传就退化成"直接选最强"（测试与固定阵容用）
+ * @param {number} [sharpness] 选择锐度：0 = 均匀随机，6 ≈ 95% 选到最强
+ */
+function aiPickDraftSkill(state, rng = null, sharpness = 6) {
+  const pool = state.draft?.available?.length ? state.draft.available : (state.draft?.options ?? []);
+  if (pool.length === 0) return null;
+  if (!rng || sharpness <= 0) {
+    // 无随机源：确定性挑最强（并列时保持候选原顺序，保证可复现）
+    return pool.reduce((best, id) => (skillStrength(id) > skillStrength(best) ? id : best), pool[0]);
+  }
+  const weights = pool.map((id) => Math.exp((skillStrength(id) * sharpness) / 10));
+  const total = weights.reduce((a, b) => a + b, 0);
+  let roll = rng.next() * total;
+  for (let i = 0; i < pool.length; i++) {
+    roll -= weights[i];
+    if (roll <= 0) return pool[i];
+  }
+  return pool[pool.length - 1];
+}
+
+/**
+ * AI 的选牌策略（观星交牌 / 汇流交牌 / 创生选数字）。
+ *
+ * 三种场景现在都是"从自己手里挑一张给对方"，方向完全一致：
+ * 交给对手**对他最没用（最卡手）**的牌 —— 统一走 pickWorstCardForOpponent：
+ *   1. 当前场上放不出去的普通数字牌（落点 0）
+ *   2. 紫 0 限锁下 E/M 也打不出去，这时优先给 E/M
+ *   3. 否则按当前落点数从少到多给
+ *
+ * 曾经的 bug：实现与注释相反，E/M 权重最低被最先送出去，等于帮对手加最强牌
+ * （实测汇流净效果为负，与这个 bug 吻合）。
+ *
+ * 注意观星在平衡性改动后不再"放回抽牌堆"，所以这里已经没有 returnToDeck 分支；
+ * 万一以后有技能再引入该 kind，会走到末尾的兜底（按"留最有用的"排序）。
+ */
+function aiPickChoiceCard(state, choice) {
+  const hand = state.hands[choice.player] ?? [];
+  const picked = new Set(choice.picked ?? []);
+  const candidates = hand.filter((c) => !picked.has(c.id));
+  if (candidates.length === 0) return null;
+
+  if (choice.kind === 'giveToOpponent') {
+    return pickWorstCardForOpponent(state, candidates);
+  }
+
+  // 兜底：放回牌堆类 — 留下最有用的（E/M > 紫 0 > 黑 5 > 当前接得上的数字）
+  const keepValue = (card) => {
+    if (card.kind !== 'number') return 100;
+    if (card.color === 'purple') return 90;
+    if (card.color === 'black') return 80;
+    return countLandingSpots(state, card.rank) * 10 + card.rank;
+  };
+  const sorted = [...candidates].sort((a, b) => keepValue(a) - keepValue(b));
+  return sorted[0];
+}
+
+/** @typedef {{id:string, label:string, description:string, decide:Function, chooseForbiddenColumn:Function}} AiProfile */
+
+/**
+ * @param {object} options
+ * @param {string} options.id
+ * @param {string} options.label
+ * @param {string} [options.description]
+ * @param {(state:object, player:number, rng:object, config:any) => object} options.pick
+ * @param {any} [options.config]
+ * @param {(state:object, rng:object) => number} [options.ban]
+ * @returns {AiProfile}
+ */
+function createProfile({ id, label, description = '', pick, config = {}, ban }) {
+  /**
+   * 处理"非正常回合"的决策：选技与选牌。
+   * 选技用 config.skillSharpness 控制"多认真挑最强技能"：
+   * 简单档小（容易被弱技能骗走），困难档大（基本都拿最强）。
+   */
+  function handleSpecial(state, player, rng) {
+    if (state.draft) {
+      if (waitingFor(state) !== player) return null;
+      // 选技阶段返回技能 id（调用方交给 chooseSkill）
+      const sharpness = config.skillSharpness ?? 6;
+      return { kind: 'skill', skillId: aiPickDraftSkill(state, rng, sharpness) };
+    }
+    if (state.pendingChoice && state.pendingChoice.player === player) {
+      const card = aiPickChoiceCard(state, state.pendingChoice);
+      if (!card) return null;
+      const action = playerActions(state, player).find((a) => a.type === 'chooseCard' && a.cardId === card.id);
+      return action ? { kind: 'action', action } : null;
+    }
+    return null;
+  }
+
+  return {
+    id,
+    label,
+    description,
+    config,
+    decide(state, player, rng = createRng(1)) {
+      const special = handleSpecial(state, player, rng);
+      if (special) return special.kind === 'skill' ? special.skillId : special.action;
+
+      const action = pick(state, player, rng, config);
+      if (!shouldUseSkill(state, player, action)) {
+        const placements = playerActions(state, player).filter((a) => a.type === 'place');
+        return orderActions(state, placements, player)[0] ?? action;
+      }
+      return guardWastefulPass(state, player, action);
+    },
+    chooseForbiddenColumn(state, rng = createRng(1)) {
+      if (ban) return ban(state, rng);
+      return suggestForbiddenColumn(state);
+    },
+  };
+}
+
+const easy = createProfile({
+  id: 'easy',
+  label: '简单',
+  description: '随机出牌，不考虑后果，适合先熟悉规则。',
+  pick: randomPick,
+  // 选技最随便：经常挑到强度低的技能（"被弱技能骗走"）
+  config: { skillSharpness: 0.7 },
+  ban: (state, rng) => rng.int(COLUMNS),
+});
+
+const normal = createProfile({
+  id: 'normal',
+  label: '普通',
+  description: '会算对手的最佳回应，懂得用炸弹和魔法争节奏。',
+  pick: treePick,
+  config: { depth: 2, beamWidth: 14, maxNodes: 4000, skillSharpness: 1.6 },
+});
+
+const hard = createProfile({
+  id: 'hard',
+  label: '困难',
+  description: '会往前多看一步，能把"我出、你回敬、我再回敬"三步一起算进来。',
+  pick: treePick,
+  // 锐度刻意不拉满：困难档大部分时候选最强，但仍保留"被弱技能诱惑"的概率
+  config: { depth: 3, beamWidth: 10, maxNodes: 12000, skillSharpness: 3 },
+});
+
+const BUILTIN_PROFILES = Object.freeze({ easy, normal, hard });
+const PROFILE_LIST = Object.freeze([easy, normal, hard]);
+
+// ─── src/ai/hints.js ─────────────────────────────────────────────
+/**
+ * 着法提示与讲解：给人类玩家用的"教练"功能。
+ *
+ * 复用 AI 的搜索，但返回可解释的结果（推荐着法 + 前几名排名 + 一句话理由），
+ * 而不是像 AI 那样只吐一个动作。
+ */
+
+
+
+
+
+/** 对手对某一手的"最强回应"。 */
+function opponentBestReply(state, player) {
+  const next = { ...state, current: other(player) };
+  const reply = orderActions(next, legalActions(next, other(player)), other(player))[0] ?? null;
+  return reply;
+}
+
+/** 用搜索给全部合法着法打分（简化假设：对手手牌用真实信息替代）。 */
+function rankMoves(state, player, searchConfig = DEFAULT_SEARCH) {
+  const ranked = [];
+  for (const action of orderActions(state, legalActions(state, player), player)) {
+    const next = applyAction(state, action);
+    const { score } = bestMoveInWorld({ ...next, current: other(player) }, player, searchConfig);
+    ranked.push({ action, score, reply: opponentBestReply(next, other(player)) });
+  }
+  ranked.sort((a, b) => b.score - a.score);
+  return ranked;
+}
+
+/** 一句话解释这一手为什么值得下。 */
+function explainAction(state, action, player) {
+  if (!action || action.type === 'pass') {
+    if (state.deck.length === 0) return '牌堆已空：过牌不抽牌，直接换手，可以用来逼对手也过牌从而进入结算。';
+    const legal = legalActions(state, player).filter((a) => a.type === 'place');
+    if (legal.length === 0) return '没有任何合法放置，只能过牌（自己抽 2 张、对手抽 1 张）。';
+    return '主动过牌会让自己多 2 张牌、对手多 1 张，通常只有在牌堆见底、想拖到结算时才划算。';
+  }
+
+  const card = action.card;
+  const top = topOf(state, action.col);
+  const reasons = [];
+  const colName = `第 ${action.col + 1} 列`;
+
+  if (isBomb(card)) {
+    reasons.push(`深/浅 E 直接炸掉${colName}顶端的 ${top?.rank}${top && isBlackFive(top) ? '（黑 5 免疫，不可）' : ''}`);
+    if (state.bases[action.col].length === 2) reasons.push('但该列只剩基底，炸完会直接暴露基底');
+  } else if (isMagic(card)) {
+    reasons.push(
+      isDark(card)
+        ? `深 M 会逼对手下回合只能在${colName}出数字牌`
+        : `浅 M 会封掉${colName}，对手下回合只能去别的列出数字牌`,
+    );
+  } else {
+    if (isPurpleZero(card)) reasons.push('紫 0 能触发全场限锁：双方下回合都只能出数字牌，压制力最强');
+    else if (isBlackFive(card)) reasons.push('黑 5 免疫炸弹，是很好的安全顶牌');
+    else if (card.rank === 5) reasons.push(`5 放上去后对手只能接 0，选择很少`);
+    else if (card.rank === 0) reasons.push(`0 也是窄口牌，对手只有 1/2 两条路`);
+    if (top) {
+      const options = allowedRanksOn(top);
+      if (options.length === 1) reasons.push(`当前顶端 ${top.rank} 本来就只有一条出路，出牌可以继续保持收紧`);
+    }
+  }
+
+  if (hasPurpleLock(state)) reasons.push('当前有紫 0 限锁，只能出数字牌');
+  if (state.hands[player].length === 1) reasons.push('这是最后一张手牌，出了就直接获胜');
+
+  if (reasons.length === 0) reasons.push(`把 ${cardName(card)} 压到${colName}顶端 ${top ? top.rank : '空'} 上`);
+  return reasons.join('；') + '。';
+}
+
+/** 给 UI 用的完整提示包。 */
+function coach(state, player, searchConfig = DEFAULT_SEARCH) {
+  const ranked = rankMoves(state, player, searchConfig).slice(0, 3);
+  const best = ranked[0];
+  return {
+    best: best?.action ?? null,
+    reason: best ? explainAction(state, best.action, player) : '当前没有可用着法',
+    alternatives: ranked.slice(1).map((entry) => ({
+      action: entry.action,
+      text: entry.action.type === 'pass' ? '过牌' : `第 ${entry.action.col + 1} 列放 ${cardName(entry.action.card)}`,
+    })),
+    evaluation: best ? Math.round(best.score) : 0,
+  };
+}
+
+/** 给 UI 用的局面评估条（-1 ~ 1，正数代表当前行动方占优）。 */
+function advantage(state, player) {
+  const raw = evaluate(state, player);
+  return Math.max(-1, Math.min(1, raw / 40));
+}
+
+// 暴露给调试用（浏览器控制台可访问）
+window.BaiFan = { BASE_COUNT, BUILTIN_PROFILES, CARD, CARD_TEXT, COLUMNS, DECK_SIZE, DEFAULT_SEARCH, DEFAULT_TURN_LIMIT, DRAFT_OPTIONS, HAND_SIZE, HISTORY_LIMIT, LANDING_SPOTS, PLAYERS, PROFILE_LIST, RULES_TEXT, SETTLE_PASSES, SKILL_API, SKILL_SEARCH_BIAS, SKILL_STRENGTH, WEIGHTS, _clearRegistry, activeRestriction, activeRestrictions, addRestriction, advantage, aiPickChoiceCard, aiPickDraftSkill, allSkillIds, allSkills, allowedRanksOn, applyAction, applyChoiceStep, applyPass, applySkill, bestMoveInWorld, buildDeckState, canAct, canPlaceAt, canPlaceWithRestriction, cardBlurb, cardCounts, cardId, cardName, cardNameSafe, cardTheme, chooseSkill, clone, coach, columnMobility, consumeRestrictions, controlValue, countLandingSpots, createDeck, createExtraCard, createGame, createProfile, createRng, createSeededRng, deckSerial, defineSkill, describeAction, drawCards, drawPlanFor, easy, evaluate, explainAction, finishTurn, firstRestriction, getSkill, guardWastefulPass, hard, hasLegalPlacement, hasPurpleLock, hasSkill, hashSeed, holderOf, immediateWin, isBlackFive, isBomb, isDark, isDigit, isMagic, isOver, isPurpleZero, legalActions, legalKindsFor, lockedOutCount, makeCard, markRestrictionsReady, mobility, newState, noRestriction, normal, onlyBase, opponentBestReply, orderActions, other, outcomeFor, passModifierFor, pickWorstCardForOpponent, playableCount, playerActions, randomPick, rankMoves, registry, restrictionBlocks, restrictionFromMagic, restrictionsFor, runGameStartHooks, sample, scoreMove, search, setForbiddenColumn, setPendingChoice, settle, shouldUseSkill, shuffle, shuffleSkillIds, singleRestrictionBlocks, skillContextOf, skillScore, skillStrength, skillsContext, skillsForbidden, suggestForbiddenColumn, summarize, takeFromHand, terminalScore, topOf, treePick, verifyHandIds, verifyLegal, waitingFor, weiyanStatus };
+
+// ─── UI 层（与模块同处一个作用域，因此能直接用上面的函数） ───
+// ===========================================================================
+// UI 层：只负责渲染与交互，所有规则判断都来自引擎
+// ===========================================================================
+
+const HUMAN = 0;
+const el = (id) => document.getElementById(id);
+
+/**
+ * 对局模式。
+ *   'ai'    人机对战：玩家控制 0 号位，AI 控制 1 号位
+ *   'duo'   双人同机：两个座位都由人操作（本地轮流）
+ *   'demo'  AI 自动演示：两个座位都由 AI 操作，纯观战
+ */
+const PLAY_MODES = {
+  ai: { id: 'ai', label: '人机对战', desc: '你操作先手座（玩家 1），AI 操作另一个座位' },
+  duo: { id: 'duo', label: '双人同机', desc: '两个座位都由人操作，本地轮流；视角固定为玩家 1' },
+  demo: { id: 'demo', label: 'AI 自动演示', desc: '两边都由 AI 操作，纯观战，用于观察技能与 AI 表现' },
+};
+
+const ui = {
+  state: null,
+  ai: BUILTIN_PROFILES.normal,
+  rng: createSeededRng('ui-' + Date.now()),
+  selectedCard: null,
+  selectedCol: null,
+  coachCache: null,
+  busy: false,
+  log: [],
+  // 是否需要人类选择禁列（后手时）
+  awaitingBan: false,
+  // 对局模式：默认人机对战
+  playMode: 'ai',
+  /**
+   * 看破的一次性快照：{ viewer, target, turn, cards:[...] }。
+   * 只是"当场看一眼"——发动之后一旦进行到下一步（不管是谁走的），就清空。
+   */
+  reveal: null,
+};
+
+/** 该座位是否由人操作。 */
+function isHumanSeat(player) {
+  if (ui.playMode === 'demo') return false;
+  if (ui.playMode === 'duo') return true;
+  if (ui.playMode === 'ai') return player === HUMAN;
+  return player === HUMAN;
+}
+
+// 把界面内部状态暴露给自动化测试与浏览器控制台（只读用途）
+if (window.BaiFan) {
+  window.BaiFan.__uiDebug = () => ({
+    playMode: ui.playMode,
+    awaitingBan: ui.awaitingBan,
+    busy: ui.busy,
+    current: ui.state ? ui.state.current : null,
+    lastPlayer: ui.state ? ui.state.lastPlayer : null,
+    firstPlayer: ui.state ? ui.state.firstPlayer : null,
+    forbiddenColumn: ui.state ? ui.state.forbiddenColumn : null,
+    humanActor: humanActor(),
+    humanSeat0: isHumanSeat(0),
+    humanSeat1: isHumanSeat(1),
+    handLabels: [ui.state ? ui.state.hands[0].length : null, ui.state ? ui.state.hands[1].length : null],
+  });
+}
+
+/**
+ * 着法追踪（默认开启，供排查"谁替我出了牌"这类问题）。
+ * 浏览器控制台执行 BaiFan.uiTrace() 可看最近 200 手。
+ */
+if (window.BaiFan) {
+  window.BaiFan.__uiTrace = [];
+  window.BaiFan.uiTrace = () => window.BaiFan.__uiTrace.slice();
+}
+
+/**
+ * 状态转移监控：把引擎返回的每个新状态都记一笔（带调用栈）。
+ * 用它来回答"这一步到底是谁推进的"——包括遗留定时器、递归 afterStep 等所有来源。
+ */
+let lastSeenState = null;
+function watchState(state, via) {
+  if (!state || state === lastSeenState) return;
+  const prev = lastSeenState;
+  lastSeenState = state;
+  const api = window.BaiFan;
+  if (api && Array.isArray(api.__uiTrace)) {
+    api.__uiTrace.push({
+      via,
+      turn: prev ? prev.turn : null,
+      nextTurn: state.turn,
+      current: state.current,
+      draft: Boolean(state.draft),
+      pending: state.pendingChoice ? state.pendingChoice.kind : null,
+      ban: state.forbiddenColumn,
+      over: state.result.over,
+      stack: String(new Error().stack).split('\n').slice(2, 6).map((s) => s.trim()),
+    });
+    if (api.__uiTrace.length > 300) api.__uiTrace.shift();
+  }
+}
+
+/** 当前是否应该由"人"来行动（选技/选牌/正常回合都算）。 */
+function humanActor() {
+  const s = ui.state;
+  if (!s || s.result.over) return null;
+  if (s.draft) {
+    const picker = waitingFor(s);
+    return picker !== null && isHumanSeat(picker) ? picker : null;
+  }
+  if (s.pendingChoice) {
+    return isHumanSeat(s.pendingChoice.player) ? s.pendingChoice.player : null;
+  }
+  return isHumanSeat(s.current) ? s.current : null;
+}
+
+// ---------------------------------------------------------------------------
+// 渲染
+// ---------------------------------------------------------------------------
+function render() {
+  const s = ui.state;
+  // 只在一次渲染里算一遍合法着法，保证牌桌高亮与手牌灰显永远一致
+  const moves = computeMoves();
+  renderBoard(s, moves);
+  renderHand(s, moves);
+  renderReveal(s);
+  renderSide(s);
+  renderHeader(s);
+}
+
+/**
+ * 看破：把"当场看到的那一眼"显示给发动者。
+ *
+ * 这是一次性快照，绑在**当时那个回合**上：快照里记了 turn，
+ * 一旦回合前进（自己出牌换了手、或对手行动）面板立刻消失，
+ * 所以不会变成"持续透视"。对方之后摸到的牌、以及此刻之后的变化都不在快照里。
+ */
+function renderReveal(s) {
+  const box = el('revealBox');
+  const snap = ui.reveal;
+  const stale = !snap || snap.turn !== s.turn || s.result.over;
+  if (stale || snap.viewer !== viewSeat()) {
+    box.hidden = true;
+    box.innerHTML = '';
+    return;
+  }
+  box.hidden = false;
+  box.innerHTML = '';
+  const title = document.createElement('span');
+  title.className = 'reveal-title';
+  title.textContent = `看破（本回合看到的）：${seatName(snap.target)}当时的手牌`;
+  box.appendChild(title);
+  for (const card of snap.cards) {
+    const chip = document.createElement('span');
+    chip.className = 'reveal-card';
+    chip.textContent = cardName(card);
+    chip.title = cardBlurb(card);
+    box.appendChild(chip);
+  }
+  const note = document.createElement('span');
+  note.className = 'reveal-note';
+  note.textContent = '（只看这一眼，之后的变化不再可知）';
+  box.appendChild(note);
+}
+
+function cardEl(card, size = '') {
+  const node = document.createElement('div');
+  node.className = `card ${size} theme-${cardTheme(card)}`;
+  const rank = cardName(card);
+  node.innerHTML = `<span class="pip">${isDigit(card) ? '' : ''}</span><span class="rank">${rank}</span><span class="kind">${isBomb(card) ? '炸弹' : isMagic(card) ? '魔法' : isBlackFive(card) ? '黑' : isPurpleZero(card) ? '紫' : '数字'}</span>`;
+  node.title = `${cardName(card)}：${cardBlurb(card)}`;
+  return node;
+}
+
+/**
+ * 把一条"下回合限制"翻译成人话。
+ * 泛化处理 M 魔法 / 禁锢 / 荆棘 / 爆弹 / 沉默 等所有同类限制。
+ * @param {object} restriction
+ * @param {boolean} forMe 是否针对人类玩家（影响措辞）
+ */
+function describeRestriction(restriction, forMe) {
+  if (!restriction || !restriction.kind) return '';
+  const label = restriction.label ?? '限制';
+  const who = forMe ? '你' : '对手';
+  const parts = [];
+  if (restriction.allowedColumns) {
+    parts.push(`只能放第 ${restriction.allowedColumns.map((c) => c + 1).join('、')} 列`);
+  }
+  if (restriction.forbiddenColumns) {
+    parts.push(`不能放第 ${restriction.forbiddenColumns.map((c) => c + 1).join('、')} 列`);
+  }
+  if (restriction.digitsOnly) parts.push('只能放数字牌');
+  if (restriction.forbidKinds?.length) parts.push('不能放 E/M');
+  if (restriction.forbidSkills) parts.push('不能使用主动技能');
+  if (restriction.forbidDigitOnCardId) parts.push('不能压在刚放下的那张数字牌上');
+  const exempt = restriction.exemptKinds?.length
+    ? `（${restriction.exemptKinds.map((k) => (k === 'e' ? 'E' : 'M')).join('/')} 不受此限）`
+    : '';
+  return `${label}：本回合${who}${parts.join('，')}。${exempt}`;
+}
+
+/** 某座位的称呼。 */
+function seatName(player) {
+  if (ui.playMode === 'duo') return `玩家 ${player + 1}`;
+  return player === HUMAN ? '你' : 'AI';
+}
+
+function renderHeader(s) {
+  const turnBadge = el('turnBadge');
+  if (s.result.over) {
+    turnBadge.className = 'badge';
+    const winner = s.result.winner;
+    turnBadge.textContent = winner === null
+      ? '平局'
+      : ui.playMode === 'demo'
+        ? `${seatName(winner)}获胜`
+        : (isHumanSeat(winner) ? `${seatName(winner)}赢了` : `${seatName(winner)}赢了`);
+    turnBadge.style.background = winner === null
+      ? 'var(--muted)'
+      : (isHumanSeat(winner) ? 'var(--ok)' : 'var(--danger)');
+    turnBadge.style.color = '#0d1117';
+  } else {
+    turnBadge.className = 'badge turn';
+    turnBadge.style = '';
+    const actor = humanActor();
+    if (actor !== null) {
+      turnBadge.textContent = ui.playMode === 'duo' ? `轮到玩家 ${actor + 1}` : '轮到你了';
+    } else if (s.draft) {
+      turnBadge.textContent = `${seatName(waitingFor(s) ?? s.current)} 选技能中…`;
+    } else {
+      turnBadge.textContent = ui.playMode === 'demo' ? 'AI 演示中…' : 'AI 思考中…';
+    }
+  }
+  const lock = hasPurpleLock(s);
+  const lockBadge = el('lockBadge');
+  lockBadge.hidden = !lock;
+  const magic = el('magicBadge');
+  // 限制可能是多条（每人一个独立槽，且可叠加），全部列出来
+  const mine = restrictionsOn(s, s.current);
+  if (mine.length > 0 && !s.result.over) {
+    magic.hidden = false;
+    magic.textContent = mine.map((r) => describeRestriction(r, isHumanSeat(s.current))).join(' ').replace(/。$/, '');
+  } else {
+    magic.hidden = true;
+  }
+  renderActBar(s);
+}
+
+/**
+ * 某个玩家身上当前生效的全部限制。
+ * 限制自「每人一个独立槽」重构后可能有多条（例如同时被荆棘粘住 + 被沉默）。
+ */
+function restrictionsOn(state, player) {
+  const api = window.BaiFan;
+  if (api && typeof api.activeRestrictions === 'function') return api.activeRestrictions(state, player);
+  return [];
+}
+
+/**
+ * 把"当前生效的限制"做成手牌上方一条显眼的横幅。
+ * 优先级：紫 0 全局限锁 > 针对当前玩家的下回合限制 > 开局禁列 > 无牌可放。
+ */
+function renderActBar(s) {
+  const bar = el('actBar');
+  const text = el('actText');
+  bar.className = 'act-bar';
+  bar.hidden = false;
+
+  if (ui.awaitingBan) {
+    bar.classList.add('ban');
+    text.textContent = `开局：${seatName(s.lastPlayer)}是后手，请先指定对方第一手不能放的那一列（选项在下方）。`;
+    return;
+  }
+
+  if (s.draft) {
+    bar.classList.add('ban');
+    text.textContent = humanActor() !== null
+      ? '选技阶段：从下方 3 个候选技能里选 1 个。'
+      : `选技阶段：${seatName(waitingFor(s) ?? s.current)} 正在选技能…`;
+    return;
+  }
+
+  if (s.pendingChoice) {
+    bar.classList.add('forced');
+    text.textContent = humanActor() !== null
+      ? `${s.pendingChoice.note ?? '请选择手牌'}（直接点手牌）`
+      : `${seatName(s.pendingChoice.player)} 正在选牌：${s.pendingChoice.note ?? ''}`;
+    return;
+  }
+
+  if (hasPurpleLock(s)) {
+    bar.classList.add('lock');
+    const suffix = humanActor() !== null ? '本回合你只能出数字牌，E / M 都不能用。' : '当前双方都只能出数字牌。';
+    text.textContent = `紫 0 限锁生效：场上有一列顶端是紫 0，${suffix}`;
+    return;
+  }
+
+  const active = restrictionsOn(s, s.current);
+  if (active.length > 0 && !s.result.over) {
+    bar.classList.add('magic');
+    text.textContent = active.map((r) => describeRestriction(r, true)).join(' ');
+    return;
+  }
+
+  const banApplies = s.forbiddenColumn !== null && s.turn === 1 && s.current === s.firstPlayer && !s.result.over;
+  if (banApplies) {
+    bar.classList.add('ban');
+    text.textContent = isHumanSeat(s.current)
+      ? `开局禁列：${seatName(s.current)}的第一手不能放第 ${s.forbiddenColumn + 1} 列（之后不再受限）。`
+      : `开局禁列：${seatName(s.current)}的第一手不能放第 ${s.forbiddenColumn + 1} 列。`;
+    return;
+  }
+
+  if (!s.result.over && humanActor() !== null && currentLegalPlacements().length === 0) {
+    bar.classList.add('forced');
+    text.textContent = '当前没有合法放置，只能过牌（自己抽 2 张、对方抽 1 张）。';
+    return;
+  }
+
+  bar.hidden = true;
+}
+
+/**
+ * 当前可选的手牌 + 每张牌各自能放的列。
+ *
+ * 关键：列的"可放"高亮必须针对某一张具体的牌，否则会出现
+ * "这张牌是亮的、这一列也是绿的，但两者组合非法"的误导，
+ * 玩家点了却没有任何反应。
+ */
+function computeMoves() {
+  const s = ui.state;
+  const byCard = new Map(); // cardId -> Set(col)
+  const actor = humanActor();
+  if (!s || s.result.over || actor === null) return byCard;
+  // 只有轮到自己能放牌时才计算（选技 / 选牌阶段不算）
+  if (s.draft || s.pendingChoice || s.current !== actor) return byCard;
+  // 用 playerActions：它才是引擎认可的合法着法集合（含主动技与各类技能例外）
+  for (const action of playerActions(s, actor)) {
+    if (action.type !== 'place') continue;
+    const set = byCard.get(action.card.id) ?? new Set();
+    set.add(action.col);
+    byCard.set(action.card.id, set);
+  }
+  return byCard;
+}
+
+/** 当前列高亮：选中了牌就只亮这张牌的合法列，否则亮所有可放列。 */
+function legalColumnsForHighlight(moves) {
+  if (ui.selectedCard && moves.has(ui.selectedCard)) return moves.get(ui.selectedCard);
+  const all = new Set();
+  for (const set of moves.values()) for (const col of set) all.add(col);
+  return all;
+}
+
+function renderBoard(s, moves) {
+  const grid = el('boardGrid');
+  grid.innerHTML = '';
+  const legalCols = legalColumnsForHighlight(moves ?? computeMoves());
+  const selectedSet = ui.selectedCard && (moves ?? computeMoves()).has(ui.selectedCard)
+    ? (moves ?? computeMoves()).get(ui.selectedCard)
+    : null;
+
+  for (let col = 0; col < s.bases.length; col++) {
+    const column = document.createElement('div');
+    const isBanned = s.forbiddenColumn === col && s.turn === 1 && s.current === s.firstPlayer;
+    const isHighlighted = legalCols.has(col);
+    const isBlockedForSelected = selectedSet !== null && !selectedSet.has(col);
+    column.className = [
+      'column',
+      ui.selectedCol === col ? 'selected' : '',
+      isHighlighted && isHumanTurn() ? 'legal' : '',
+      isBlockedForSelected && isHumanTurn() ? 'not-for-selected' : '',
+      isBanned ? 'banned' : '',
+    ].join(' ');
+
+    const top = s.bases[col][s.bases[col].length - 1] ?? null;
+    const head = document.createElement('div');
+    head.className = 'column-head';
+    head.innerHTML = `<b>第 ${col + 1} 列</b><span>${isBanned ? '先手禁列' : top ? `顶端 ${cardName(top)}` : '空'}</span>`;
+    column.appendChild(head);
+
+    // 只显示顶端那一条规则，避免挤压牌堆
+    if (top) {
+      const hint = document.createElement('div');
+      hint.className = 'stack-hint';
+      hint.textContent = isBanned ? '先手第一手不能放这里' : cardBlurb(top);
+      column.appendChild(hint);
+    }
+
+    const stack = document.createElement('div');
+    if (s.bases[col].length === 0) {
+      stack.className = 'empty-slot';
+      stack.textContent = '空列';
+      column.appendChild(stack);
+    } else {
+      column.appendChild(fannedStack(s.bases[col], col));
+    }
+
+    // 点列本身 = 选这一列放牌（仅轮到我且该列可放时）
+    if (isHumanTurn()) {
+      column.classList.add('clickable');
+      column.onclick = () => onColumnClick(col);
+    }
+    grid.appendChild(column);
+  }
+}
+
+/**
+ * 叠放用的牌条：横向显示"点数 + 类型"，高度固定 54px，
+ * 配合负 margin 就能实现"只露出牌头"的叠放效果。
+ */
+function cardStrip(card, isTop) {
+  const node = document.createElement('div');
+  node.className = `card-strip theme-${cardTheme(card)}${isTop ? ' is-top' : ''}`;
+
+  const rank = document.createElement('span');
+  rank.className = 'strip-rank';
+  rank.textContent = cardName(card);
+
+  const kind = document.createElement('span');
+  kind.className = 'strip-kind';
+  kind.textContent = isDigit(card) ? '' : isBomb(card) ? '炸弹' : '魔法';
+
+  node.append(rank, kind);
+  node.title = `${cardName(card)}：${cardBlurb(card)}`;
+  return node;
+}
+
+/**
+ * 把一列牌画成"只露出牌头"的叠放：越往上的牌越靠下、盖住下面那张，
+ * 因此每张牌的牌头都露在外面，最顶端的牌完整可见。点整摞打开详情。
+ * @param {Array} stack 自下而上的牌
+ * @param {number} col
+ */
+function fannedStack(stack, col) {
+  const wrap = document.createElement('div');
+  wrap.className = 'fanned';
+  wrap.title = `点击查看第 ${col + 1} 列的全部 ${stack.length} 张牌`;
+
+  // 每张牌露出的高度：牌少露得多，牌多自动收紧，避免撑爆布局。
+  const stripHeight = 54;
+  const peek = stack.length <= 3 ? 30 : stack.length <= 6 ? 24 : stack.length <= 10 ? 19 : 15;
+
+  stack.forEach((card, index) => {
+    const isTop = index === stack.length - 1;
+    const holder = document.createElement('div');
+    holder.className = 'fanned-card';
+    if (index > 0) holder.style.marginTop = `${peek - stripHeight}px`;
+    holder.style.zIndex = String(index + 1);
+    holder.appendChild(cardStrip(card, isTop));
+    wrap.appendChild(holder);
+  });
+
+  const depth = document.createElement('span');
+  depth.className = 'stack-depth';
+  depth.textContent = `共 ${stack.length} 张`;
+  wrap.appendChild(depth);
+
+  const flag = document.createElement('span');
+  flag.className = 'top-flag';
+  flag.textContent = '顶端';
+  wrap.appendChild(flag);
+
+  wrap.onclick = (event) => {
+    // 阻止冒泡到列的"放牌"点击
+    event.stopPropagation();
+    showColumnDetail(col);
+  };
+  return wrap;
+}
+
+/** 牌堆详情弹窗：从底到顶列出整列。 */
+function showColumnDetail(col) {
+  // 详情与"开局/结算"共用同一个 modal，这里避免互相串扰。
+  const modal = el('modal');
+  const heading = el('modalBody').querySelector('h2');
+  const modalBusy = !modal.hidden && heading && !/^第 \d+ 列/.test(heading.textContent);
+  if (modalBusy) return;
+
+  const s = ui.state;
+  const stack = s.bases[col];
+  const body = el('modalBody');
+  const rows = stack
+    .map((card, index) => {
+      const isTop = index === stack.length - 1;
+      return `
+        <div class="detail-row${isTop ? ' top' : ''}">
+          <div class="card mini theme-${cardTheme(card)}"><span class="rank">${cardName(card)}</span></div>
+          <div class="detail-text">
+            <span class="detail-name">${cardName(card)}${isTop ? '（顶端，生效中）' : ''}</span>
+            <span class="detail-blurb">${cardBlurb(card)}</span>
+          </div>
+          <span class="detail-order">第 ${index + 1} 张${index === 0 ? ' · 基底' : ''}</span>
+        </div>`;
+    })
+    .join('');
+
+  body.innerHTML = `
+    <h2>第 ${col + 1} 列 · 共 ${stack.length} 张</h2>
+    <p>列表已按牌堆顺序排列：最下面是基底，最上面是当前生效的牌。</p>
+    <div class="col-detail">${rows}</div>
+    <div class="row" style="margin-top:14px">
+      <button class="btn primary" id="btnDetailClose">关闭</button>
+    </div>
+  `;
+  el('modal').hidden = false;
+  body.querySelector('#btnDetailClose').onclick = () => {
+    el('modal').hidden = true;
+  };
+}
+
+function renderHand(s, moves) {
+  const hand = el('myHand');
+  hand.innerHTML = '';
+  const byCard = moves ?? computeMoves();
+  const seat = viewSeat();
+
+  // 选牌阶段：手牌改为"可点选"，而不是"可放置"
+  const choosing = Boolean(s.pendingChoice) && humanActor() === s.pendingChoice.player;
+  const picked = new Set(choosing ? s.pendingChoice.picked ?? [] : []);
+
+  for (const card of s.hands[seat]) {
+    const node = cardEl(card, '');
+    const playable = byCard.has(card.id);
+
+    if (choosing) {
+      // 选牌阶段的候选可以再被 candidateIds 收窄（汇流：只能交刚抽到的那几张）。
+      // 不在候选里的牌要跟"不能出的牌"一样低亮，而不是含糊地说"已经选过了"。
+      const inPool = !s.pendingChoice.candidateIds
+        || s.pendingChoice.candidateIds.includes(card.id);
+      if (picked.has(card.id)) node.classList.add('picked');
+      else if (!inPool) node.classList.add('blocked', 'out-of-pool');
+      else if (picked.size >= (s.pendingChoice.count ?? 1)) node.classList.add('blocked');
+      else node.classList.add('pickable');
+      node.onclick = () => {
+        if (!canHumanAct()) return;
+        onHandCardForChoice(card);
+      };
+      hand.appendChild(node);
+      continue;
+    }
+
+    if (s.draft) {
+      // 选技阶段：手牌只做展示，不可操作
+      node.classList.add('blocked');
+      hand.appendChild(node);
+      continue;
+    }
+
+    if (!playable) node.classList.add('blocked');
+    if (ui.selectedCard === card.id) node.classList.add('selected');
+    node.onclick = () => {
+      if (!canHumanAct()) return;
+      if (!playable) {
+        setStatus(`${cardName(card)}：${cardBlockedReason(card)}`);
+        return;
+      }
+      const wasSelected = ui.selectedCard === card.id;
+      ui.selectedCard = wasSelected ? null : card.id;
+      if (wasSelected) {
+        // 取消选中：清掉列选择，避免残留的选中列影响下一步操作
+        ui.selectedCol = null;
+        render();
+        return;
+      }
+      // 选中这张牌后，牌桌只高亮它真正能放的列
+      const cols = byCard.get(card.id) ?? new Set();
+      const colList = [...cols].sort((a, b) => a - b);
+      setStatus(
+        colList.length > 0
+          ? `${cardName(card)} 可以放：${colList.map((c) => `第 ${c + 1} 列`).join('、')}`
+          : `${cardName(card)} 当前无列可放`,
+      );
+      // 若之前选中的列正好也能放这张牌，就直接出牌
+      if (ui.selectedCol !== null && cols.has(ui.selectedCol)) {
+        render();
+        tryPlay();
+        return;
+      }
+      ui.selectedCol = null;
+      render();
+    };
+    hand.appendChild(node);
+  }
+
+  el('myCount').textContent = `${s.hands[seat].length} 张`;
+  const rivalName = ui.playMode === 'demo' ? 'AI' : ui.playMode === 'duo' ? '对方' : 'AI';
+  el('oppInfo').textContent = `${rivalName} 手牌 ${s.hands[rivalSeat()].length} 张 · 牌堆 ${s.deck.length} 张`;
+}
+
+/** 选牌阶段点手牌：累加选择，选够张数就自动生效。 */
+function onHandCardForChoice(card) {
+  const s = ui.state;
+  const choice = s.pendingChoice;
+  if (!choice) return;
+  const action = playerActions(s, choice.player).find((a) => a.type === 'chooseCard' && a.cardId === card.id);
+  if (!action) {
+    // 三种"点不动"的原因要分开说，否则玩家只会看到一句含糊的"已经选过了"
+    const alreadyPicked = (choice.picked ?? []).includes(card.id);
+    const outOfPool = Array.isArray(choice.candidateIds) && !choice.candidateIds.includes(card.id);
+    const reason = alreadyPicked
+      ? '已经选过这张了'
+      : outOfPool
+        ? '这一手只能交出高亮的那几张牌（刚抽到的新牌）'
+        : '这张牌现在不能选';
+    if (window.BaiFan) {
+      window.BaiFan.__lastChoice = {
+        ok: false,
+        why: reason,
+        cardId: card.id,
+        picked: choice.picked ?? [],
+        count: choice.count ?? 1,
+        outOfPool,
+      };
+    }
+    setStatus(`${cardName(card)}：${reason}`);
+    return;
+  }
+  if (window.BaiFan) {
+    window.BaiFan.__lastChoice = { ok: true, cardId: card.id, picked: (choice.picked?.length ?? 0) + 1 };
+  }
+  play(action, `选牌：${cardName(card)}（${(choice.picked?.length ?? 0) + 1}/${choice.count ?? 1}）`);
+}
+
+function renderSide(s) {
+  el('statDeck').textContent = String(s.deck.length);
+  el('statOpp').textContent = String(s.hands[rivalSeat()].length);
+  el('statMine').textContent = String(s.hands[viewSeat()].length);
+  el('statOut').textContent = String(s.outOfPlay.length);
+  el('statAi').textContent = ui.ai.label;
+
+  // 模式徽章 + 手牌区标题：让人一眼看清"现在谁在操作、这是谁的牌"
+  const modeBadge = el('modeBadge');
+  if (modeBadge) modeBadge.textContent = PLAY_MODES[ui.playMode].label;
+  const handLabel = el('myHandLabel');
+  if (handLabel) {
+    const seat = viewSeat();
+    handLabel.textContent = ui.playMode === 'duo'
+      ? `玩家 ${seat + 1} 的手牌`
+      : (seat === HUMAN ? '我的手牌' : 'AI 的手牌（演示）');
+  }
+  renderTrace();
+
+  const out = el('outPile');
+  out.innerHTML = '';
+  if (s.outOfPlay.length === 0) out.innerHTML = '<span class="subtitle">暂无</span>';
+  else for (const card of s.outOfPlay) out.appendChild(cardEl(card, 'mini'));
+
+  const logBox = el('logBox');
+  logBox.innerHTML = '';
+  for (const entry of ui.log.slice(-60)) {
+    const line = document.createElement('div');
+    line.className = entry.tone ?? '';
+    line.textContent = entry.text;
+    logBox.appendChild(line);
+  }
+  logBox.scrollTop = logBox.scrollHeight;
+
+  const passBtn = el('btnPass');
+  // 选技/选牌阶段不能过牌；其余轮到自己的时候可以
+  const canPass = canHumanAct() && !s.draft && !s.pendingChoice;
+  passBtn.disabled = !canPass;
+  el('btnHint').disabled = !(canHumanAct() && !s.draft && !s.pendingChoice);
+  renderBanBar(s);
+  renderChoiceBar(s);
+  renderSkillPanel(s);
+}
+
+/** 把"着法溯源"渲染出来，方便定位"谁替我出了牌"。 */
+function renderTrace() {
+  const box = el('traceBox');
+  if (!box) return;
+  const trace = window.BaiFan && Array.isArray(window.BaiFan.__uiTrace) ? window.BaiFan.__uiTrace : [];
+  box.innerHTML = '';
+  if (trace.length === 0) {
+    box.innerHTML = '<div>暂无记录</div>';
+    return;
+  }
+  for (const entry of trace.slice(-12).reverse()) {
+    const line = document.createElement('div');
+    const isBlocked = entry.via === 'AI被拦截';
+    if (isBlocked) line.className = 'bad';
+    if (entry.via && entry.via.startsWith('play:')) {
+      line.textContent = `你操作：${entry.via.slice(5)}`;
+    } else if (entry.via === 'AI被拦截') {
+      line.textContent = `已拦截：AI 试图在轮到人时行动（回合 ${entry.turn}）`;
+    } else if (entry.via && entry.via.startsWith('ai:')) {
+      line.textContent = `AI 操作：${entry.via.slice(3)}（回合 ${entry.turn}→${entry.nextTurn}）`;
+    } else {
+      line.textContent = `${entry.via ?? '?'}（回合 ${entry.turn}→${entry.nextTurn}）`;
+    }
+    box.appendChild(line);
+  }
+}
+
+/** 交互式选牌提示条（观星 / 汇流）。 */
+function renderChoiceBar(s) {
+  const bar = el('choiceBar');
+  const choice = s.pendingChoice;
+  if (!choice) {
+    bar.hidden = true;
+    return;
+  }
+  bar.hidden = false;
+  const count = choice.count ?? 1;
+  const picked = choice.picked?.length ?? 0;
+  const mine = humanActor() === choice.player;
+  const who = ui.playMode === 'duo' ? `玩家 ${choice.player + 1}` : 'AI';
+  // 候选被收窄时（汇流：只能交刚抽到的牌），说清楚"只有这几张能选"
+  const limited = Array.isArray(choice.candidateIds) && choice.candidateIds.length < (s.hands[choice.player]?.length ?? 0);
+  const hint = limited ? '（只有高亮的这几张能选）' : '（直接点手牌即可）';
+  el('choiceTitle').textContent = mine
+    ? `${choice.note ?? '请选择手牌'}（已选 ${picked} / ${count}${hint}`
+      + `${limited ? '，其余牌这一手不能交出去' : ''}）`
+    : `${who} 正在选牌：${choice.note ?? ''}（已选 ${picked} / ${count}）`;
+
+  const row = el('choiceRow');
+  row.innerHTML = '';
+  // 需要选多张时提供"确认"（选够张数后会自动生效，这里给个手动兜底）
+  if (mine && picked > 0 && count > 1) {
+    const confirm = playerActions(s, choice.player).find((a) => a.type === 'confirmChoice');
+    if (confirm) {
+      const button = document.createElement('button');
+      button.className = 'btn primary sm';
+      button.textContent = `确认（已选 ${picked} 张）`;
+      button.onclick = () => play(confirm, `确认选牌（${picked} 张）`);
+      row.appendChild(button);
+    }
+  }
+}
+
+/** 技能面板：展示双方技能与可用操作。 */
+function renderSkillPanel(s) {
+  const box = el('skillBox');
+  box.innerHTML = '';
+  const context = skillContextOf(s);
+  const actor = humanActor();
+  const actions = canHumanAct() && !s.draft && !s.pendingChoice && actor !== null ? playerActions(s, actor) : [];
+  const skillActions = actions.filter((a) => a.type === 'skill');
+
+  // 先手优先展示（与技能的结算优先级一致）
+  const ordered = [...context.entries].sort((a, b) => a.player - b.player);
+
+  if (ordered.length === 0) {
+    box.innerHTML = '<span class="subtitle">本局没有技能</span>';
+    return;
+  }
+
+  for (const entry of ordered) {
+    const def = entry.skill;
+    const used = s.usesById[def.id] ?? 0;
+    const remaining = def.type === 'active' ? Math.max(0, def.maxUses - used) : 0;
+    // 双人模式下"我的"跟着当前视角座位走
+    const mine = entry.player === viewSeat();
+
+    const card = document.createElement('div');
+    card.className = `skill-card${mine ? ' mine' : ''}`;
+
+    const mineActions = entry.player === actor ? skillActions.filter((a) => a.skill === def.id) : [];
+    if (mineActions.length > 0) card.classList.add('usable');
+
+    const head = document.createElement('div');
+    head.className = 'skill-head';
+    const name = document.createElement('span');
+    name.className = 'skill-name';
+    name.textContent = def.name;
+    const owner = document.createElement('span');
+    owner.className = 'skill-owner';
+    owner.textContent = mine
+      ? (ui.playMode === 'duo' ? `玩家 ${entry.player + 1}（你）` : '你')
+      : (ui.playMode === 'duo' ? `玩家 ${entry.player + 1}` : 'AI');
+    const tag = document.createElement('span');
+    tag.className = 'skill-tag';
+    if (def.type === 'passive') {
+      tag.textContent = '被动';
+    } else if (remaining > 0) {
+      tag.textContent = `主动 ${remaining}/${def.maxUses}`;
+      tag.classList.add('active');
+    } else {
+      tag.textContent = '已用完';
+      tag.classList.add('used');
+    }
+    head.append(name, owner, tag);
+    card.appendChild(head);
+
+    const text = document.createElement('div');
+    text.className = 'skill-text';
+    text.textContent = def.text;
+    card.appendChild(text);
+
+    // 威严专属状态条：发动中 / 已失效（持有者放过 E/M 之后失效）
+    if (def.id === 'weiyan') {
+      const status = weiyanStatus(s);
+      if (status) {
+        const active = status.active;
+        card.classList.add(active ? 'live' : 'dead');
+        const line = document.createElement('div');
+        line.className = `skill-state ${active ? 'on' : 'off'}`;
+        line.textContent = active
+          ? `⚔ 发动中：${seatName(status.blockedPlayer)}不能放置 E/M（${seatName(status.holder)}一旦放过 E 或 M 就失效）`
+          : '— 已失效：持有者已经放过 E 或 M，双方恢复自由';
+        card.appendChild(line);
+      }
+    }
+
+    if (mineActions.length > 0) {
+      const row = document.createElement('div');
+      row.className = 'skill-actions';
+      for (const action of mineActions) {
+        const button = document.createElement('button');
+        button.className = 'btn sm';
+        button.textContent = action.label ?? `发动 ${def.name}`;
+        button.onclick = () => {
+          const actor2 = humanActor();
+          const who = ui.playMode === 'duo' ? `玩家 ${(actor2 ?? 0) + 1}` : '你';
+          play(action, `${who}发动了 ${def.name}${action.label ? `：${action.label.replace(/^[^：]*：/, '')}` : ''}`);
+        };
+        row.appendChild(button);
+      }
+      card.appendChild(row);
+    }
+
+    box.appendChild(card);
+  }
+}
+
+function setStatus(text) {
+  el('statusLine').textContent = text;
+}
+
+/** 当前由人操作的那个座位（没有则返回 null）。 */
+function isHumanTurn() {
+  return humanActor() !== null && !ui.awaitingBan;
+}
+
+function canHumanAct() {
+  return isHumanTurn() && !ui.busy;
+}
+
+/**
+ * 界面视角座位：手牌区展示谁的手牌、提示与教练针对谁。
+ * - 人机 / 演示：固定看 0 号位
+ * - 双人：跟随当前行动方，轮到谁就展示谁的牌
+ */
+function viewSeat() {
+  const actor = humanActor();
+  if (ui.playMode === 'duo' && actor !== null) return actor;
+  return HUMAN;
+}
+
+/** 对方座位（相对当前视角）。 */
+function rivalSeat() {
+  return 1 - viewSeat();
+}
+
+function currentLegalPlacements() {
+  const actor = humanActor();
+  if (!ui.state || ui.state.result.over || actor === null) return [];
+  return playerActions(ui.state, actor).filter((a) => a.type === 'place');
+}
+
+/**
+ * 这张牌"为什么放不了"。返回 null 表示能放。
+ *
+ * 必须走 playerActions（引擎认可的完整合法着法集合）而不是裸的 canPlaceAt：
+ * 威严这类"整类禁牌"的技能不是 rules 层的限制，只用 canPlaceAt 会查不出来，
+ * 于是"能放"和"被禁"的结论互相矛盾。
+ */
+function cardBlockedReason(card) {
+  const actor = humanActor();
+  if (!ui.state || actor === null) return '现在不是你的回合';
+  const legal = playerActions(ui.state, actor).some((a) => a.type === 'place' && a.card.id === card.id);
+  if (legal) return null;
+
+  // 先问技能层的"整类禁牌"
+  const kinds = legalKindsFor(ui.state, actor);
+  if (kinds && !kinds.includes(card.kind)) {
+    const status = weiyanStatus(ui.state);
+    if (status && status.active && status.holder !== actor) {
+      return `${seatName(status.holder)}的威严发动中：本局对方不能放置 E/M`;
+    }
+    return '当前的限制不允许放这一类牌';
+  }
+  // 否则是牌桌上的硬规则（列顶接不上 / 基底不可炸 / 黑 5 免疫…）
+  for (let col = 0; col < ui.state.bases.length; col++) {
+    const verdict = canPlaceAt(ui.state, actor, col, card);
+    if (verdict.ok) {
+      const blocked = restrictionBlocks(ui.state, col, card, actor);
+      return blocked.ok ? '当前没有可放置的位置' : blocked.reason;
+    }
+  }
+  for (let col = 0; col < ui.state.bases.length; col++) {
+    const verdict = canPlaceAt(ui.state, actor, col, card);
+    if (!verdict.ok) return verdict.reason;
+  }
+  return '当前没有可放置的位置';
+}
+
+// ---------------------------------------------------------------------------
+// 交互
+// ---------------------------------------------------------------------------
+function onColumnClick(col) {
+  // 记录最近一次点击，便于排查"点了没反应"这类问题（浏览器控制台可直接查看）
+  if (window.BaiFan) {
+    window.BaiFan.__lastClick = {
+      col,
+      humanTurn: isHumanTurn(),
+      busy: ui.busy,
+      selectedCard: ui.selectedCard,
+      current: ui.state ? ui.state.current : null,
+    };
+  }
+  if (!isHumanTurn() || ui.busy) return;
+  ui.selectedCol = ui.selectedCol === col ? null : col;
+  render();
+  if (ui.selectedCard && ui.selectedCol !== null) tryPlay();
+}
+
+function tryPlay() {
+  const s = ui.state;
+  const actor = humanActor();
+  if (actor === null) return;
+  const card = s.hands[actor].find((c) => c.id === ui.selectedCard);
+  if (!card) {
+    if (window.BaiFan) window.BaiFan.__lastTryPlay = { ok: false, why: '选中牌已不在手中', selectedCard: ui.selectedCard };
+    return;
+  }
+  // 走 playerActions：它才是引擎认可的合法着法集合（含技能例外）
+  const action = playerActions(s, actor).find(
+    (a) => a.type === 'place' && a.col === ui.selectedCol && a.card.id === card.id,
+  );
+  if (!action) {
+    if (window.BaiFan) {
+      window.BaiFan.__lastTryPlay = {
+        ok: false,
+        why: '引擎判定不能放这里',
+        col: ui.selectedCol,
+        cardId: card.id,
+        reason: (canPlaceAt(s, actor, ui.selectedCol, card) || {}).reason ?? null,
+      };
+    }
+    const verdict = canPlaceAt(s, actor, ui.selectedCol, card);
+    setStatus(`不能放在第 ${ui.selectedCol + 1} 列：${verdict.ok ? '未知原因' : verdict.reason}`);
+    return;
+  }
+  if (window.BaiFan) window.BaiFan.__lastTryPlay = { ok: true, col: action.col, cardId: card.id };
+  const who = ui.playMode === 'duo' ? `玩家 ${actor + 1} 放置了` : '你放置了';
+  play(action, `${who} ${cardName(card)}`);
+}
+
+/**
+ * 界面层的最后一道错误兜底：任何异常都写进战报，而不是静默失败。
+ * 静默失败会让界面看起来"点了没反应"，非常难排查。
+ */
+function reportUiError(where, error) {
+  const message = error && error.message ? error.message : String(error);
+  pushLog(`界面出错（${where}）：${message}`, 'bad');
+  if (error && error.stack) pushLog(String(error.stack).split('\n').slice(0, 3).join(' / '), 'bad');
+  try {
+    render();
+  } catch (nested) {
+    // 渲染本身也失败时不再递归，避免死循环
+    void nested;
+  }
+}
+
+/** 往溯源数组里塞一条记录（统一入口，避免各处直接摸 window.BaiFan）。 */
+function traceRaw(entry) {
+  const api = window.BaiFan;
+  if (!api || !Array.isArray(api.__uiTrace)) return;
+  api.__uiTrace.push(entry);
+  if (api.__uiTrace.length > 300) api.__uiTrace.shift();
+}
+
+/** 记录一次由界面发起的着法（含调用栈），用于排查"谁替我出了牌"。 */
+function traceUiAction(action, label, before, after) {
+  traceRaw({
+    via: 'ui.play',
+    mode: ui.playMode,
+    action: action.type,
+    player: action.player,
+    label,
+    turn: before.turn,
+    nextTurn: after ? after.turn : null,
+    stack: String(new Error().stack).split('\n').slice(2, 7).map((s) => s.trim()),
+  });
+}
+
+function play(action, label) {
+  try {
+    const before = ui.state;
+    const next = applyAction(before, action);
+    traceUiAction(action, label, before, next);
+    watchState(next, `play:${action.type}@${action.player}`);
+    ui.state = next;
+    ui.selectedCard = null;
+    ui.selectedCol = null;
+    ui.coachCache = null;
+    // 看破：在"这一步"记下对手当时的手牌（下一次操作时会被清掉）
+    if (action.type === 'skill' && action.skill === 'kanpo') {
+      captureReveal(before, action.player);
+    }
+    pushLog(label, actionTone(action, before, ui.state));
+    setStatus('');
+    render();
+    afterStep();
+  } catch (error) {
+    traceUiAction(action, `（失败）${label}`, ui.state, null);
+    reportUiError('执行着法', error);
+  }
+}
+
+/**
+ * 记下看破"当场看到的那一眼"。
+ * 用发动前的状态取手牌，这样拿到的正是"看之前"那一刻的对方手牌。
+ */
+function captureReveal(before, viewer) {
+  const target = 1 - viewer;
+  ui.reveal = {
+    viewer,
+    target,
+    turn: before.turn,
+    cards: (before.hands[target] ?? []).map((c) => ({ ...c })),
+  };
+}
+
+/** 人类在选技阶段选择技能。 */
+function playSkillChoice(skillId) {
+  try {
+    const before = ui.state;
+    const picker = waitingFor(before);
+    const next = chooseSkill(before, picker, skillId);
+    watchState(next, `playSkillChoice@${picker}`);
+    ui.state = next;
+    pushLog(`你选择了技能：${getSkill(skillId)?.name ?? skillId}`, 'hi');
+    render();
+    afterStep();
+  } catch (error) {
+    reportUiError('选择技能', error);
+  }
+}
+
+function actionTone(action, before, after) {
+  if (after.result.over) {
+    if (after.result.winner === null) return '';
+    return isHumanSeat(after.result.winner) ? 'good' : 'bad';
+  }
+  if (action.type === 'skill') return 'hi';
+  if (action.type === 'place' && after.lastAction.destroyed?.length) return 'hi';
+  if (action.type === 'place' && action.card.kind === 'm') return 'hi';
+  return '';
+}
+
+function onPass() {
+  if (!canHumanAct()) return;
+  const s = ui.state;
+  const actor = humanActor();
+  if (actor === null) return;
+  const action = playerActions(s, actor).find((a) => a.type === 'pass');
+  const who = ui.playMode === 'duo' ? `玩家 ${actor + 1} 过牌` : '你过牌';
+  const rival = seatName(1 - actor);
+  play(action, s.deck.length >= 3 ? `${who}：你抽 2 张，${rival}抽 1 张` : `${who}（牌堆已空，双方都不抽牌）`);
+}
+
+/**
+ * AI 回合：先画一帧"AI 思考中"，稍后同步结算。
+ *
+ * 一个"AI 步骤"可能是：选技能、选牌、或正常的出牌/过牌/发动技能——
+ * 统一由 waitingFor / playerActions 决定，AI 只需要在候选里挑一个。
+ */
+const AI_THINK_DELAY = 200;
+
+/**
+ * 选技阶段的界面：把 3 个候选做成按钮放进操作条。
+ * （不遮挡手牌，与禁列提示条同一套做法）
+ */
+function renderBanBar(s) {
+  const bar = el('banBar');
+  if (ui.awaitingBan) {
+    bar.hidden = false;
+    el('banBar').querySelector('.ban-title').textContent = '你是后手：请先指定禁列（对方第一手不能放的列）';
+    const row = el('banRow');
+    row.innerHTML = '';
+    for (let col = 0; col < s.bases.length; col++) {
+      const stack = s.bases[col];
+      const top = stack[stack.length - 1];
+      const button = document.createElement('button');
+      button.className = 'btn primary sm';
+      button.textContent = `第 ${col + 1} 列（基底 ${cardName(stack[0])}｜顶端 ${cardName(top)}）`;
+      button.onclick = () => chooseBan(col);
+      row.appendChild(button);
+    }
+    return;
+  }
+
+  const picker = s.draft ? waitingFor(s) : null;
+  if (s.draft && picker !== null && isHumanSeat(picker)) {
+    bar.hidden = false;
+    el('banBar').querySelector('.ban-title').textContent = `请${seatName(picker)}选择一个技能（已被选走的不能再选）`;
+    const row = el('banRow');
+    row.innerHTML = '';
+    // 已经被对方选走的技能要显示出来但不能点，避免"技能凭空消失"的困惑
+    for (const id of s.draft.options) {
+      const def = getSkill(id);
+      const taken = !s.draft.available.includes(id);
+      const button = document.createElement('button');
+      button.className = `btn sm${taken ? '' : ' primary'}`;
+      button.textContent = `${def?.name ?? id}（${def?.type === 'active' ? '主动' : '被动'}）${taken ? ' · 已被选走' : ''}`;
+      button.title = def?.text ?? '';
+      button.disabled = taken;
+      if (!taken) button.onclick = () => playSkillChoice(id);
+      row.appendChild(button);
+    }
+    return;
+  }
+
+  bar.hidden = true;
+}
+
+/**
+ * 挂起的 AI 定时器集合。
+ * 用集合而不是单个 id：任何时刻都可能存在多个排队中的 AI 回合，
+ * 只要"该由人行动"，就必须把它们全部取消，否则会出现"过期定时器晚一步替人行动"。
+ */
+const aiTimers = new Set();
+
+/** 取消所有尚未触发的 AI 定时器。 */
+function cancelAiTimer() {
+  for (const id of aiTimers) clearTimeout(id);
+  aiTimers.clear();
+}
+
+function scheduleAi() {
+  ui.busy = true;
+  render();
+  const id = setTimeout(() => {
+    aiTimers.delete(id);
+    finishAiStep();
+  }, AI_THINK_DELAY);
+  aiTimers.add(id);
+}
+
+/** AI 一步的实际执行逻辑（从定时器回调里分离出来，便于阅读与测试）。 */
+function finishAiStep() {
+  try {
+    if (ui.state.result.over) {
+      ui.busy = false;
+      return;
+    }
+    if (isHumanTurn()) {
+      // 轮到人类：交给交互，不要抢回合
+      ui.busy = false;
+      render();
+      return;
+    }
+
+    // 人类还在选禁列：AI 的先手第一手必须等禁列确定之后
+    if (ui.awaitingBan) {
+      ui.busy = false;
+      render();
+      return;
+    }
+
+    // 硬护栏：只要此刻该由人操作，AI 一律不许行动。
+    // 正常情况下不会走到这里（轮到人时上面的 isHumanTurn 已经拦住，且过期定时器会被取消），
+    // 真走到这里说明有异常时序，只静默跳过，不替人行动。
+    if (humanActor() !== null) {
+      ui.busy = false;
+      traceRaw({
+        via: 'AI被拦截',
+        mode: ui.playMode,
+        action: 'blocked',
+        player: humanActor(),
+        label: '该由人操作，AI 已拒绝行动',
+        turn: ui.state.turn,
+        stack: String(new Error().stack).split('\n').slice(2, 6).map((s) => s.trim()),
+      });
+      render();
+      return;
+    }
+
+    const before = ui.state;
+    let action = null;
+    let label = '';
+
+    if (before.draft) {
+      const picker = waitingFor(before);
+      // 走 profile.decide：选技优先级由 AI 层统一决定（实测强度表 + 档位锐度），
+      // UI 不再维护自己的选技启发式——否则档位配置与强度表都会被绕过。
+      const decided = ui.ai.decide(before, picker, ui.rng);
+      const available = before.draft.available ?? before.draft.options ?? [];
+      const skillId = typeof decided === 'string' && available.includes(decided) ? decided : available[0];
+      label = `${seatName(picker)}选择了技能：${getSkill(skillId)?.name ?? skillId}`;
+      const next = chooseSkill(before, picker, skillId);
+      watchState(next, `aiSkillChoice@${picker}`);
+      ui.state = next;
+      pushLog(label, 'hi');
+      ui.busy = false;
+      render();
+      afterStep();
+      return;
+    }
+
+    // 正常回合 / 选牌阶段：都从 playerActions 里挑
+    const actor = before.pendingChoice ? before.pendingChoice.player : before.current;
+    action = ui.ai.decide(before, actor, ui.rng);
+    label = describeActorAction(action, before, actor);
+    const aiNext = applyAction(before, action);
+    watchState(aiNext, `ai:${action && action.type}@${actor}`);
+    ui.state = aiNext;
+    pushLog(label, actionTone(action, before, ui.state));
+    ui.busy = false;
+    render();
+    afterStep();
+  } catch (error) {
+    // 出错时必须清掉 busy，否则界面会卡在"AI 思考中"且所有操作都不可用。
+    ui.busy = false;
+    if (window.BaiFan) {
+      window.BaiFan.__aiError = {
+        message: error && error.message ? error.message : String(error),
+        stack: error && error.stack ? String(error.stack).split('\n').slice(0, 4) : null,
+      };
+    }
+    pushLog(`AI 出错：${error && error.message ? error.message : error}`, 'bad');
+    if (error && error.stack) pushLog(String(error.stack).split('\n').slice(0, 3).join(' / '), 'bad');
+    render();
+  }
+}
+
+/**
+ * 把 AI 的着法翻译成战报文案。
+ * 过牌要把双方抽牌都写清楚：自己抽 2、对方抽 1（只写一半会让人以为对方没抽牌）。
+ */
+function describeActorAction(action, before, actor) {
+  const who = seatName(actor);
+  if (action.type === 'pass') {
+    const rival = seatName(1 - actor);
+    return before.deck.length >= 3
+      ? `${who}过牌：${who}抽 2 张，${rival}抽 1 张`
+      : `${who}过牌（牌堆已空，双方都不抽牌，直接换手）`;
+  }
+  if (action.type === 'chooseCard') return `${who}选了 ${cardName(action.card)}`;
+  if (action.type === 'confirmChoice') return `${who}确认了选牌`;
+  if (action.type === 'skill') {
+    const def = getSkill(action.skill);
+    return `${who}发动了 ${def?.name ?? action.skill}${action.label ? `：${action.label.replace(/^[^：]*：/, '')}` : ''}`;
+  }
+  return `${who}把 ${cardName(action.card)} 放到第 ${action.col + 1} 列`;
+}
+
+/** 一步结束之后：判胜负、处理开局阶段、把行动权交给人类或继续让 AI 走。 */
+function afterStep() {
+  const s = ui.state;
+  if (s.result.over) return showResult();
+
+  // 选技阶段
+  if (s.draft) {
+    if (isHumanTurn()) afterHumanTurnStart();
+    else scheduleAi();
+    return;
+  }
+
+  // 禁列：由"后手那一方的操作者"决定，必须先于先手的第一手。
+  // 只在第 1 回合还有意义（引擎里禁列也只对 turn === 1 的第一次放置生效），
+  // 并且必须让先手的开局技能选牌（观星）先落地——否则人类玩家还没选牌，
+  // 界面就跳到禁列上，看起来像"AI 抢着先出牌"。
+  const pastBan = s.forbiddenColumn !== null || s.turn > 1;
+  const humanChoosing = Boolean(s.pendingChoice) && isHumanSeat(s.pendingChoice.player);
+  if (!pastBan && !ui.awaitingBan && !humanChoosing) {
+    const banSeat = s.lastPlayer;
+    if (isHumanSeat(banSeat)) {
+      // 人类是后手：先让他指定禁列，并且**必须停在这里等**。
+      // 之前这里没有 return，流程会落到下面的 scheduleAi()，
+      // 结果先手 AI 的第一手抢在禁列选择之前发生——顺序反了。
+      cancelAiTimer();
+      ui.awaitingBan = true;
+      pushLog(`选技完成：${seatName(banSeat)}是后手，请先指定对方第一手不能放的列`, 'hi');
+      render();
+      return;
+    }
+    const col = ui.ai.chooseForbiddenColumn(s, ui.rng);
+    ui.state = setForbiddenColumn(s, col);
+    pushLog(`${seatName(banSeat)}指定：${seatName(s.firstPlayer)}的第一手不能放第 ${col + 1} 列`, 'bad');
+    render();
+    afterStep();
+    return;
+  }
+
+  // 等待人类指定禁列期间，任何一方都不该动
+  if (ui.awaitingBan) return;
+
+  if (humanActor() !== null) {
+    cancelAiTimer();
+    afterHumanTurnStart();
+    return;
+  }
+  scheduleAi();
+}
+
+/** 每轮到人类时：处理"无牌可放"提示，并在先手第一手前处理禁列。 */
+function afterHumanTurnStart() {
+  const s = ui.state;
+  if (s.result.over) return;
+  if (s.draft) {
+    setStatus('请选择一个技能。');
+    render();
+    return;
+  }
+  if (s.pendingChoice) {
+    setStatus(s.pendingChoice.note ?? '请选择手牌。');
+    render();
+    return;
+  }
+  if (humanActor() === null) return;
+  if (currentLegalPlacements().length === 0) {
+    setStatus('当前没有合法放置，只能过牌。');
+  }
+  render();
+}
+
+function pushLog(text, tone = '') {
+  ui.log.push({ text, tone });
+}
+
+// ---------------------------------------------------------------------------
+// 开局 / 禁列 / 结算
+// ---------------------------------------------------------------------------
+function showSetup() {
+  const body = el('modalBody');
+  body.innerHTML = `
+    <h2>开始对局</h2>
+    <p>先选对局模式，再选 AI 难度。开局会随机亮出 3 个技能，后手先选，然后指定禁列。</p>
+    <div class="section-label">对局模式</div>
+    <div class="diff-list" id="modeList"></div>
+    <div class="section-label">AI 难度（仅 AI 参与的座位使用）</div>
+    <div class="diff-list" id="diffList"></div>
+    <div class="row" style="margin-top:14px">
+      <button class="btn primary" id="btnStart">开始对局</button>
+      <span id="setupHint" class="subtitle" style="align-self:center"></span>
+    </div>
+  `;
+
+  let pickedMode = ui.playMode;
+  let picked = ui.ai.id;
+
+  const modeList = body.querySelector('#modeList');
+  const drawModes = () => {
+    modeList.innerHTML = '';
+    for (const mode of Object.values(PLAY_MODES)) {
+      const node = document.createElement('div');
+      node.className = `diff${mode.id === pickedMode ? ' selected' : ''}`;
+      node.innerHTML = `<div><div class="name">${mode.label}</div><div class="desc">${mode.desc}</div></div>`;
+      node.onclick = () => {
+        pickedMode = mode.id;
+        drawModes();
+      };
+      modeList.appendChild(node);
+    }
+  };
+
+  const list = body.querySelector('#diffList');
+  const draw = () => {
+    list.innerHTML = '';
+    for (const profile of PROFILE_LIST) {
+      const node = document.createElement('div');
+      node.className = `diff${profile.id === picked ? ' selected' : ''}`;
+      node.innerHTML = `<div><div class="name">${profile.label}</div><div class="desc">${profile.description}</div></div>`;
+      node.onclick = () => {
+        picked = profile.id;
+        draw();
+      };
+      list.appendChild(node);
+    }
+  };
+
+  drawModes();
+  draw();
+  el('modal').hidden = false;
+  body.querySelector('#btnStart').onclick = () => {
+    ui.ai = BUILTIN_PROFILES[picked];
+    ui.playMode = pickedMode;
+    el('modal').hidden = true;
+    newGame();
+  };
+}
+
+function newGame() {
+  // 带技能开局：先进入"随机 3 个技能、后手先选"的选技阶段
+  cancelAiTimer();
+  ui.state = createGame({ seed: Math.floor(Math.random() * 1e9), withSkills: true });
+  ui.selectedCard = null;
+  ui.selectedCol = null;
+  ui.coachCache = null;
+  ui.busy = false;
+  ui.log = [];
+  ui.awaitingBan = false;
+
+  const s = ui.state;
+  const mode = PLAY_MODES[ui.playMode];
+  pushLog(`新对局开始（${mode.label}）：你操作玩家 1，对手是「${ui.ai.label}」`);
+  pushLog(`基底：${s.bases.map((b, i) => `第${i + 1}列 ${cardName(b[0])}`).join('，')}`);
+  if (s.draft) {
+    pushLog(`候选技能：${s.draft.options.map((id) => getSkill(id)?.name ?? id).join('、')}`, 'hi');
+    pushLog('后手先选技能；选完技能再指定禁列', 'hi');
+  }
+  render();
+  afterStep();
+}
+
+/** 人类作为后手指定禁列。 */
+function chooseBan(col) {
+  if (!ui.awaitingBan) return;
+  const banSeat = ui.state.lastPlayer;
+  ui.state = { ...ui.state, forbiddenColumn: col };
+  ui.awaitingBan = false;
+  pushLog(`${seatName(banSeat)}指定：${seatName(ui.state.firstPlayer)}的第一手不能放第 ${col + 1} 列`, 'hi');
+  render();
+  afterStep();
+}
+
+function showResult() {
+  const s = ui.state;
+  const draw = s.result.winner === null;
+  const winner = s.result.winner;
+  const won = !draw && isHumanSeat(winner);
+  const title = draw
+    ? '平局'
+    : ui.playMode === 'demo'
+      ? `${seatName(winner)}获胜`
+      : won ? `${seatName(winner)}赢了` : `${seatName(winner)}赢了`;
+  const body = el('modalBody');
+  body.innerHTML = `
+    <h2>${title}</h2>
+    <p>${s.result.reason ?? ''}<br>
+       剩余手牌 — 玩家 1：${s.hands[0].length} 张 / 玩家 2：${s.hands[1].length} 张<br>
+       共 ${s.turn - 1} 手，牌堆剩余 ${s.deck.length} 张</p>
+    <div class="row">
+      <button class="btn primary" id="btnAgain">再来一局</button>
+      <button class="btn" id="btnReview">查看牌桌</button>
+      <button class="btn" id="btnMode">切换模式</button>
+    </div>
+  `;
+  el('modal').hidden = false;
+  body.querySelector('#btnAgain').onclick = () => {
+    el('modal').hidden = true;
+    newGame();
+  };
+  body.querySelector('#btnReview').onclick = () => {
+    el('modal').hidden = true;
+  };
+  body.querySelector('#btnMode').onclick = () => {
+    el('modal').hidden = true;
+    showSetup();
+  };
+  pushLog(`对局结束：${s.result.reason}`, draw ? '' : won ? 'good' : 'bad');
+  render();
+}
+
+function showRules() {
+  const body = el('modalBody');
+  body.innerHTML = `
+    <h2>规则速查</h2>
+    <ul style="font-size:13px;line-height:1.8;color:var(--muted);padding-left:18px">
+      ${RULES_TEXT.map((line) => `<li>${line}</li>`).join('')}
+    </ul>
+    <h2 style="font-size:16px;margin-top:18px">技能一览</h2>
+    <div class="skill-list" style="font-size:13px">
+      ${allSkills().map((def) => {
+        const kind = def.type === 'active' ? `主动 · 每局限 ${def.maxUses} 次` : '被动';
+        return `<div class="skill-item"><b>${def.name}</b><span class="skill-kind">${kind}</span><span class="skill-desc">${def.text}</span></div>`;
+      }).join('')}
+    </div>
+    <div class="row" style="margin-top:16px"><button class="btn primary" id="btnClose">知道了</button></div>
+  `;
+  el('modal').hidden = false;
+  body.querySelector('#btnClose').onclick = () => {
+    el('modal').hidden = true;
+  };
+}
+
+function onHint() {
+  if (!canHumanAct()) return;
+  setStatus('教练计算中…');
+  el('btnHint').disabled = true;
+  setTimeout(() => {
+    try {
+      const result = coach(ui.state, humanActor());
+      const move = result.best;
+      const moveText = !move ? '无' : move.type === 'pass' ? '过牌' : `第 ${move.col + 1} 列放 ${cardName(move.card)}`;
+      const alts = result.alternatives
+        .map((alt) => `${alt.action.type === 'pass' ? '过牌' : `第 ${alt.action.col + 1} 列放 ${cardName(alt.action.card)}`}`)
+        .join('、');
+      el('hintBox').textContent = `推荐：${moveText}\n理由：${result.reason}${alts ? `\n备选：${alts}` : ''}`;
+      setStatus('');
+    } catch (error) {
+      el('hintBox').textContent = `提示失败：${error.message}`;
+    } finally {
+      el('btnHint').disabled = false;
+      render();
+    }
+  }, 30);
+}
+
+// 暴露给调试与自动化探针使用（浏览器控制台可读当前 UI 状态）
+if (window.BaiFan) window.BaiFan.__uiState = () => ui.state;
+
+/**
+ * 测试钩子：把一个构造好的引擎状态直接塞进界面并重新进入"一步之后"的流程。
+ * 只给 tools/ui-test.mjs 用，让"黑 5 免疫""看破"这类需要特定牌面的场景可以被
+ * 确定性地复现，不必靠随机对局碰运气。正式游玩不会走这里。
+ */
+if (window.BaiFan) {
+  window.BaiFan.__uiInject = (state) => {
+    ui.state = state;
+    ui.awaitingBan = false;
+    ui.busy = false;
+    ui.selectedCard = null;
+    ui.selectedCol = null;
+    afterStep();
+  };
+}
+
+
+// ---------------------------------------------------------------------------
+// 启动
+// ---------------------------------------------------------------------------
+el('ruleList').innerHTML = RULES_TEXT.map((line) => `<li>${line}</li>`).join('');
+
+/**
+ * 技能一览：直接读技能定义，所以文案只有一份（改技能就自动跟着变）。
+ * 显示格式：名称 + 发动方式（主动：每局限 N 次 / 被动）+ 原文效果。
+ */
+function renderSkillList() {
+  const box = el('skillList');
+  if (!box) return;
+  box.innerHTML = '';
+  for (const def of allSkills()) {
+    const item = document.createElement('div');
+    item.className = 'skill-item';
+    const kind = def.type === 'active' ? `主动 · 每局限 ${def.maxUses} 次` : '被动';
+    item.innerHTML = `<b>${def.name}</b><span class="skill-kind">${kind}</span><span class="skill-desc">${def.text}</span>`;
+    box.appendChild(item);
+  }
+}
+
+renderSkillList();
+el('btnPass').onclick = onPass;
+el('btnHint').onclick = onHint;
+el('btnNew').onclick = () => {
+  el('modal').hidden = true;
+  showSetup();
+};
+el('btnRules').onclick = showRules;
+
+showSetup();
+})();
+
+try {
+  var boot = document.getElementById('boot');
+  if (boot) {
+    boot.setAttribute('data-boot', 'ok');
+    boot.setAttribute('data-fingerprint', '83d0f32f');
+  }
+} catch (error) { /* 自检失败不影响游戏 */ }
+
+</script>
+</body>
+</html>
